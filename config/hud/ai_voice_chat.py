@@ -341,23 +341,22 @@ class BrainThread(QThread):
             cmd = [
                 sys.executable, "-m", "edge_tts",
                 "--voice", "ru-RU-SvetlanaNeural",
-                "--pitch=+55Hz", "--rate=+10%",
+                "--pitch=+55Hz", "--rate=+12%",
                 f"--text={voice_text}", f"--write-media={AUDIO_PATH}"
             ]
             subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         except Exception: pass
 
-        dur = max(2.5, len(ans) / 13.0)
+        dur = max(2.0, len(ans) / 16.0)
         self.ready.emit(ans, AUDIO_PATH, dur, action_payload)
 
 # -------------------------------------------------------------
-# ЦЕНТРАЛЬНЫЙ АВАТАР: ЧИСТЫЙ QT ФЛАГ РАБОЧЕГО СТОЛА (БЕЗ ДЕДЛОКОВ XPROP)
+# ЦЕНТРАЛЬНЫЙ АВАТАР: БЕЗУПРЕЧНАЯ ПРИВЯЗКА К СТОЛУ + SPINNER + БЫСТРЫЙ TYPEWRITER
 # -------------------------------------------------------------
 class CenterDeckAvatar(QWidget):
     def __init__(self):
         super().__init__()
-        # Исключаем из таскбара и прибиваем к фоновому слою рабочего стола
-        self.setWindowFlags(Qt.SubWindow | Qt.FramelessWindowHint | Qt.WindowStaysOnBottomHint)
+        self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnBottomHint | Qt.SubWindow)
         self.setAttribute(Qt.WA_TranslucentBackground, True)
         self.setAttribute(Qt.WA_ShowWithoutActivating, True)
 
@@ -393,6 +392,15 @@ class CenterDeckAvatar(QWidget):
             self.av_lbl.setPixmap(rounded)
         layout.addWidget(self.av_lbl, alignment=Qt.AlignCenter)
 
+        # Неоновый спиннер ожидания
+        self.spinner_frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
+        self.spinner_idx = 0
+        self.spinner_lbl = QLabel("")
+        self.spinner_lbl.setAlignment(Qt.AlignCenter)
+        self.spinner_lbl.setStyleSheet("color: #00ffff; font-family: monospace; font-size: 20px; font-weight: bold; background: transparent;")
+        self.spinner_lbl.hide()
+        layout.addWidget(self.spinner_lbl, alignment=Qt.AlignCenter)
+
         self.timer_badge = QLabel("")
         self.timer_badge.setAlignment(Qt.AlignCenter)
         self.timer_badge.setStyleSheet("""
@@ -418,7 +426,42 @@ class CenterDeckAvatar(QWidget):
         self.full_text = ""
         self.char_idx = 0
 
+        self.spin_timer = QTimer(self)
+        self.spin_timer.timeout.connect(self.spin_tick)
+
+        # Защита от сворачивания Super+D: мягкий таймер на установку типа окна
+        QTimer.singleShot(500, self.enforce_desktop_layer)
+
+    def enforce_desktop_layer(self):
+        try:
+            win_id = int(self.winId())
+            subprocess.run(["xprop", "-id", str(win_id), "-f", "_NET_WM_WINDOW_TYPE", "32a",
+                            "-set", "_NET_WM_WINDOW_TYPE", "_NET_WM_WINDOW_TYPE_DESKTOP"],
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            subprocess.run(["xprop", "-id", str(win_id), "-f", "_NET_WM_STATE", "32a",
+                            "-set", "_NET_WM_STATE", "_NET_WM_STATE_SKIP_TASKBAR,_NET_WM_STATE_SKIP_PAGER,_NET_WM_STATE_BELOW"],
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        except Exception:
+            pass
+
+    def start_thinking(self, prompt_text):
+        self.type_timer.stop()
+        self.lbl_user.setText(f"« {prompt_text} »")
+        self.lbl_user.show()
+        self.lbl_sub.hide()
+        self.spinner_lbl.setText("⠋")
+        self.spinner_lbl.show()
+        self.spin_timer.start(80)
+        self.adjustSize()
+
+    def spin_tick(self):
+        self.spinner_idx = (self.spinner_idx + 1) % len(self.spinner_frames)
+        self.spinner_lbl.setText(self.spinner_frames[self.spinner_idx])
+
     def start_speech(self, user_text, reply_text, duration):
+        self.spin_timer.stop()
+        self.spinner_lbl.hide()
+
         self.lbl_user.setText(f"« {user_text} »")
         self.lbl_user.show()
 
@@ -427,21 +470,32 @@ class CenterDeckAvatar(QWidget):
         self.lbl_sub.setText("")
         self.lbl_sub.show()
 
+        # Быстрый typewriter: максимум 18 мс на символ, чтобы печать не отставала
         total_chars = max(1, len(self.full_text))
-        interval = int(max(15, ((duration - 0.2) * 1000) / total_chars))
+        interval = max(12, int(((duration * 0.75) * 1000) / total_chars))
 
         self.type_timer.stop()
         self.type_timer.start(interval)
         self.adjustSize()
 
     def typewriter_step(self):
+        # Печатаем сразу пачками по 2 символа для приятной динамики
+        step_len = 2 if len(self.full_text) > 40 else 1
         if self.char_idx < len(self.full_text):
-            self.char_idx += 1
-            self.lbl_sub.setText(self.full_text[:self.char_idx] + "▌")
+            self.char_idx = min(len(self.full_text), self.char_idx + step_len)
+            self.lbl_sub.setText(self.full_text[:self.char_idx] + ("▌" if self.char_idx < len(self.full_text) else ""))
         else:
             self.type_timer.stop()
             self.lbl_sub.setText(self.full_text)
             self.adjustSize()
+
+    def clear_text_display(self):
+        self.spin_timer.stop()
+        self.type_timer.stop()
+        self.spinner_lbl.hide()
+        self.lbl_user.hide()
+        self.lbl_sub.hide()
+        self.adjustSize()
 
 # -------------------------------------------------------------
 # КНОПКА ТРИГГЕР НА РАБОЧЕМ СТОЛЕ
@@ -452,7 +506,7 @@ class FloatingDeckTrigger(QWidget):
         self.center_avatar = center_avatar
         self.hud_popup = None
 
-        self.setWindowFlags(Qt.SubWindow | Qt.FramelessWindowHint | Qt.WindowStaysOnBottomHint)
+        self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnBottomHint | Qt.SubWindow)
         self.setAttribute(Qt.WA_TranslucentBackground, True)
         self.setAttribute(Qt.WA_ShowWithoutActivating, True)
 
@@ -478,16 +532,31 @@ class FloatingDeckTrigger(QWidget):
         screen = QApplication.primaryScreen().geometry()
         self.move(screen.width() - 170, screen.height() - 85)
 
+        QTimer.singleShot(600, self.enforce_desktop_layer)
+
+    def enforce_desktop_layer(self):
+        try:
+            win_id = int(self.winId())
+            subprocess.run(["xprop", "-id", str(win_id), "-f", "_NET_WM_WINDOW_TYPE", "32a",
+                            "-set", "_NET_WM_WINDOW_TYPE", "_NET_WM_WINDOW_TYPE_DESKTOP"],
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            subprocess.run(["xprop", "-id", str(win_id), "-f", "_NET_WM_STATE", "32a",
+                            "-set", "_NET_WM_STATE", "_NET_WM_STATE_SKIP_TASKBAR,_NET_WM_STATE_SKIP_PAGER,_NET_WM_STATE_BELOW"],
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        except Exception:
+            pass
+
     def toggle_chat(self):
         if self.hud_popup and self.hud_popup.isVisible():
             self.hud_popup.close()
             self.hud_popup = None
+            self.center_avatar.clear_text_display()
         else:
             self.hud_popup = FloatingAiChatDialog(self, self.center_avatar)
             self.hud_popup.show()
 
 # -------------------------------------------------------------
-# ДИАЛОГОВЫЙ ЧАТ С ИСТОРИЕЙ
+# ДИАЛОГОВЫЙ ЧАТ
 # -------------------------------------------------------------
 class FloatingAiChatDialog(QWidget):
     def __init__(self, parent_trigger, center_avatar):
@@ -532,7 +601,7 @@ class FloatingAiChatDialog(QWidget):
             QPushButton { background: transparent; color: #888899; font-size: 14px; font-weight: bold; border: none; }
             QPushButton:hover { color: #ff5588; }
         """)
-        btn_close.clicked.connect(self.close)
+        btn_close.clicked.connect(self.close_and_clear)
         header.addWidget(btn_close)
         card_layout.addLayout(header)
 
@@ -627,6 +696,10 @@ class FloatingAiChatDialog(QWidget):
         self.populate_history()
         self.input_field.setFocus()
 
+    def close_and_clear(self):
+        self.close()
+        self.center_avatar.clear_text_display()
+
     def populate_history(self):
         for q, a in CHAT_HISTORY[-6:]:
             self.append_message(q, is_user=True)
@@ -672,7 +745,10 @@ class FloatingAiChatDialog(QWidget):
         if not txt: return
         self.input_field.clear()
 
+        # 1. Сразу отображаем в чате
         self.append_message(txt, is_user=True)
+        # 2. Сразу отображаем на центральном аватаре и включаем спиннер ожидания
+        self.center_avatar.start_thinking(txt)
 
         self.brain = BrainThread(txt)
         self.brain.ready.connect(lambda reply, audio, dur, act: self.on_brain_reply(txt, reply, audio, dur, act))
@@ -680,6 +756,7 @@ class FloatingAiChatDialog(QWidget):
 
     def on_brain_reply(self, user_txt, reply, audio, dur, act):
         self.append_message(reply, is_user=False)
+        # Запускаем синхронную быструю печать
         self.center_avatar.start_speech(user_txt, reply, dur)
 
         if os.path.exists(audio):
