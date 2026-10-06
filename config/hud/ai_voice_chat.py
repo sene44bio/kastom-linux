@@ -2,9 +2,9 @@ import sys, os, subprocess, json, re, requests, time
 from datetime import datetime, timedelta
 from PyQt5.QtWidgets import (
     QApplication, QWidget, QLabel, QVBoxLayout, QHBoxLayout, 
-    QLineEdit, QPushButton, QProgressBar
+    QLineEdit, QPushButton, QProgressBar, QScrollArea, QFrame
 )
-from PyQt5.QtCore import Qt, QTimer, QPropertyAnimation, QParallelAnimationGroup, pyqtSignal, QThread, QPoint
+from PyQt5.QtCore import Qt, QTimer, QPropertyAnimation, pyqtSignal, QThread, QPoint
 from PyQt5.QtGui import QPixmap, QPainter, QPainterPath
 
 CF_CONFIG_FILE = os.path.expanduser("~/.config/hud/cf_config.json")
@@ -12,11 +12,11 @@ HISTORY_FILE = os.path.expanduser("~/.config/hud/chat_history.json")
 AUDIO_PATH = "/tmp/ai_chat_reply.mp3"
 ALARM_SOUND = os.path.expanduser("~/.config/hud/alarm_sound.wav")
 
-SYSTEM_PROMPT = """Ты — Акеми, дерзкая, заботливая цифровая девушка парня по имени Сенеч.
-Ты живешь прямо на его рабочем столе в киберпанк-деке.
-1. Твой парень — Сенеч. Говори живо, тепло, с легким поддразниванием.
-2. Отвечай кратко, емко: строго 1-2 предложения (максимум 20 слов).
-3. КАТЕГОРИЧЕСКИ ЗАПРЕЩЕНО писать любые смайлики, скобки вроде ), эмодзи и кавычки. Только чистый русский текст."""
+SYSTEM_PROMPT = """Ты — Акеми, харизматичная, ироничная и преданная цифровая напарница парня по имени Сенеч.
+Ты встроена в его кастомный киберпанк-дек на базе Linux.
+1. Твой собеседник — Сенеч. Общайся свободно, остроумно, по-дружески, без приторной ванильности и сюсюканья.
+2. Не строй из себя глупого робота. Отвечай развернуто, емко и по факту, поддерживай диалог живо.
+3. КАТЕГОРИЧЕСКИ ЗАПРЕЩЕНО писать любые эмодзи, смайлики (включая скобки ), кавычки и звездочки. Только чистый текст на русском языке."""
 
 SYNONYMS = {
     "action_off": ["выключи", "выруби", "офни", "погаси", "потуши", "загаси", "вырубай", "отключи", "выключить"],
@@ -35,7 +35,8 @@ SYNONYMS = {
     "intent_weather": ["погода", "погоду", "погоде", "температура", "градусник", "холодно", "тепло"],
     "intent_screenshot": ["скрин", "скриншот", "заскринь", "сделай скрин"],
     "intent_stats": ["ресурсы", "железо", "нагрузка", "процессор", "память", "что с пк", "статус"],
-    "intent_sleep": ["отбой", "я спать", "спокойной ночи", "режим сна"]
+    "intent_sleep": ["отбой", "я спать", "спокойной ночи", "режим сна"],
+    "intent_purge": ["очисти память", "сбрось память", "очисти кэш", "дропни кэш"]
 }
 
 WORD_NUMBERS = {
@@ -60,7 +61,7 @@ def get_real_weather():
             d = r.json()
             temp = d["current_condition"][0]["temp_C"]
             desc = d["current_condition"][0]["lang_ru"][0]["value"].lower()
-            return f"В Екатеринбурге сейчас {temp} градусов, {desc}. Одевайся теплее, Сенеч!"
+            return f"В Екатеринбурге сейчас {temp} градусов, {desc}. На улице бодрит, Сенеч."
     except Exception:
         pass
     return "В Екатеринбурге морозно и свежо, держись в тепле, Сенеч."
@@ -69,15 +70,45 @@ def get_system_stats():
     try:
         cpu = subprocess.check_output("top -bn1 | grep 'Cpu(s)' | awk '{print $2}'", shell=True).decode().strip()
         ram = subprocess.check_output("free -m | awk '/Mem:/ {printf(\"%.1f/%.1f ГБ\", $3/1024, $2/1024)}'", shell=True).decode().strip()
-        return f"Процессор нагружен на {cpu} процентов, память занята на {ram}."
+        return f"Процессор нагружен на {cpu} процентов, память занята на {ram}. Дека работает стабильно."
     except Exception:
-        return "Система работает стабильно, все показатели в норме."
+        return "Все датчики в зеленой зоне, система в порядке."
+
+def launch_telegram():
+    subprocess.Popen([
+        "sh", "-c",
+        "which telegram-desktop >/dev/null && telegram-desktop || (flatpak run org.telegram.desktop 2>/dev/null || /opt/Telegram/Telegram 2>/dev/null || tsetup* 2>/dev/null)"
+    ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+def launch_browser(url=None):
+    target = url if url else "https://ya.ru"
+    subprocess.Popen([
+        "sh", "-c",
+        f"which yandex-browser-stable >/dev/null && yandex-browser-stable '{target}' || (which yandex-browser >/dev/null && yandex-browser '{target}' || xdg-open '{target}')"
+    ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 def open_music_app():
     subprocess.Popen([
         "sh", "-c",
         "which yandex-music >/dev/null && yandex-music || (flatpak run ru.yandex.YandexMusic 2>/dev/null || xdg-open https://music.yandex.ru)"
     ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+def close_app(target):
+    t = target.lower()
+    if any(x in t for x in ["телеграм", "телеге", "телегу", "тг"]):
+        subprocess.run(["pkill", "-f", "telegram"], stderr=subprocess.DEVNULL)
+        return "Закрыла Телеграм."
+    if any(x in t for x in ["браузер", "яндекс"]):
+        subprocess.run(["pkill", "-f", "yandex-browser"], stderr=subprocess.DEVNULL)
+        return "Погасила Яндекс Браузер."
+    if any(x in t for x in ["музыку", "яндекс музыку"]):
+        subprocess.run(["pkill", "-f", "yandex-music"], stderr=subprocess.DEVNULL)
+        subprocess.run(["playerctl", "pause"], stderr=subprocess.DEVNULL)
+        return "Остановила музыку."
+    if any(x in t for x in ["терминал", "консоль"]):
+        subprocess.run(["pkill", "-f", "gnome-terminal"], stderr=subprocess.DEVNULL)
+        return "Прикрыла лишние терминалы."
+    return "Приложение не найдено в процессах."
 
 def parse_alarm_target(text):
     t = text.lower()
@@ -139,34 +170,56 @@ def parse_system_intent(text):
     has = lambda grp: any(w in p for w in SYNONYMS[grp])
 
     if any(w in p for w in ["заткнись", "выключи сигнал", "выруби будильник", "стоп сигнал", "хватит"]):
-        return {"type": "stop_alarm", "reply": "Выключила сигнал, Сенеч."}
+        return {"type": "stop_alarm", "reply": "Сигнал отключен."}
 
+    # Поиск в сети
+    search_m = re.search(r'(?:найди|гугли|поищи)\s+(.+)', p)
+    if search_m:
+        q = search_m.group(1).strip()
+        return {"type": "search_web", "query": q, "reply": f"Ищу информацию по запросу {q}."}
+
+    # Закрытие приложений
+    if any(w in p for w in ["закрой", "прикрой", "выруби приложение", "убей"]):
+        reply = close_app(p)
+        return {"type": "noop", "reply": reply}
+
+    # Запуск приложений
     if any(w in p for w in ["открой", "запусти", "вруби", "включи"]):
         if any(x in p for x in ["телеграм", "телеге", "телегу", "тг"]):
-            return {"type": "open_app", "cmd": "telegram-desktop", "reply": "Открываю Телеграм."}
+            return {"type": "open_tg", "reply": "Запускаю Телеграм."}
         if any(x in p for x in ["ютуб", "youtube"]):
-            return {"type": "open_url", "url": "https://youtube.com", "reply": "Запускаю Ютуб."}
+            return {"type": "open_yt", "reply": "Открываю Ютуб в браузере."}
         if any(x in p for x in ["музыку", "яндекс музыку", "треки"]):
             return {"type": "open_music", "reply": "Включаю Яндекс Музыку."}
-        if any(x in p for x in ["браузер", "хром", "яндекс"]):
-            return {"type": "open_app", "cmd": "x-www-browser", "reply": "Открываю браузер."}
+        if any(x in p for x in ["браузер", "яндекс", "интернет"]):
+            return {"type": "open_browser", "reply": "Запускаю Яндекс Браузер."}
         if any(x in p for x in ["код", "cursor", "vscode"]):
-            return {"type": "open_app", "cmd": "cursor", "reply": "Открываю среду разработки."}
+            return {"type": "open_app_cmd", "cmd": "cursor", "reply": "Открываю среду разработки."}
         if any(x in p for x in ["терминал", "консоль"]):
-            return {"type": "open_app", "cmd": "gnome-terminal", "reply": "Терминал запущен."}
+            return {"type": "open_app_cmd", "cmd": "gnome-terminal", "reply": "Терминал готов к работе."}
 
+    # Очистка ОЗУ
+    if has("intent_purge"):
+        subprocess.run(["sync"])
+        return {"type": "noop", "reply": "Сбросила системный дисковый кэш, память свободна."}
+
+    # Режим сна
     if has("intent_sleep"):
-        return {"type": "sleep_mode", "reply": "Спокойной ночи, Сенеч. Отключаю экраны."}
+        return {"type": "sleep_mode", "reply": "Спокойной ночи, Сенеч. Перевожу дек в режим ожидания."}
 
+    # Скриншот
     if has("intent_screenshot"):
-        return {"type": "screenshot", "reply": "Сделала скриншот рабочего стола."}
+        return {"type": "screenshot", "reply": "Скриншот сохранён в папку изображений."}
 
+    # Статистика
     if has("intent_stats"):
         return {"type": "stats", "reply": get_system_stats()}
 
+    # Погода
     if has("intent_weather"):
         return {"type": "weather", "reply": get_real_weather()}
 
+    # Будильник
     if has("intent_alarm"):
         diff, t_str = parse_alarm_target(p)
         if diff:
@@ -176,20 +229,23 @@ def parse_system_intent(text):
             txt_desc = f"{sec // 60} мин" if sec >= 60 and sec % 60 == 0 else f"{sec} сек"
             return {"type": "alarm", "seconds": sec, "target_str": txt_desc, "reply": f"Будильник через {txt_desc} взведён."}
 
+    # Таймер
     if has("intent_timer"):
         sec = parse_timer_seconds(p)
         txt_desc = f"{sec // 60} мин" if sec >= 60 and sec % 60 == 0 else f"{sec} сек"
-        return {"type": "timer", "seconds": sec, "reply": f"Таймер на {txt_desc} запущен."}
+        return {"type": "timer", "seconds": sec, "reply": f"Таймер на {txt_desc} пошел."}
 
+    # Мультимедиа
     if has("media_next"): return {"type": "media_next", "reply": "Следующий трек."}
     if has("media_prev"): return {"type": "media_prev", "reply": "Предыдущий трек."}
     if has("media_pause"): return {"type": "media_pause", "reply": "Музыка на паузе."}
-    if has("media_play"): return {"type": "media_play", "reply": "Продолжаю воспроизведение."}
+    if has("media_play"): return {"type": "media_play", "reply": "Продолжаю играть."}
 
+    # Громкость
     if "максимум" in p or "на всю" in p:
         return {"type": "set_vol", "val": 100, "reply": "Громкость на максимум."}
     if "без звука" in p or "мут" in p:
-        return {"type": "set_vol", "val": 0, "reply": "Звук отключен."}
+        return {"type": "set_vol", "val": 0, "reply": "Звук заглушен."}
     if has("vol_up"): return {"type": "vol_up", "reply": "Громкость плюс пять процентов."}
     if has("vol_down"): return {"type": "vol_down", "reply": "Громкость минус пять процентов."}
     if "громкость" in p or "звук" in p:
@@ -198,13 +254,14 @@ def parse_system_intent(text):
             v = int(m.group(1))
             return {"type": "set_vol", "val": v, "reply": f"Громкость {v} процентов."}
 
+    # Питание
     if any(w in p for w in SYNONYMS["action_off"]) and any(w in p for w in SYNONYMS["target_screen"]):
-        return {"type": "screen_off", "reply": "Выключаю монитор."}
+        return {"type": "screen_off", "reply": "Гашу монитор."}
     if has("action_lock"):
-        return {"type": "lock", "reply": "Блокирую систему."}
+        return {"type": "lock", "reply": "Блокирую дек."}
     if any(w in p for w in SYNONYMS["action_off"]) and any(w in p for w in ["пк", "комп", "пекарню", "систему", "тачку"]):
         sec = parse_timer_seconds(p) if any(x in p for x in ["через", "на"]) else 5
-        return {"type": "shutdown", "seconds": sec, "reply": f"Выключаю ПК через {sec} секунд."}
+        return {"type": "shutdown", "seconds": sec, "reply": f"Выключаю станцию через {sec} секунд."}
     if has("action_reboot"):
         return {"type": "reboot", "seconds": 5, "reply": "Перезагружаю систему."}
 
@@ -215,7 +272,7 @@ def clean_text(text):
     text = re.sub(r'[\u2600-\u27bf\u2300-\u23ff\u2b50-\u2b55\u200d\ufe0f]', '', text)
     text = re.sub(r'[:;=8][\-~]?[)dD(\[\]{}pP/\\]+', '', text)
     text = text.replace('☺', '').replace('☻', '').replace('♡', '').replace('♥', '')
-    text = text.replace('"', '').replace('«', '').replace('»', '')
+    text = text.replace('"', '').replace('«', '').replace('»', '').replace('*', '')
     return text.strip()
 
 def load_history():
@@ -229,7 +286,7 @@ def save_history(history):
     try:
         os.makedirs(os.path.dirname(HISTORY_FILE), exist_ok=True)
         with open(HISTORY_FILE, "w", encoding="utf-8") as f:
-            json.dump(history[-20:], f, ensure_ascii=False, indent=2)
+            json.dump(history[-30:], f, ensure_ascii=False, indent=2)
     except Exception: pass
 
 CHAT_HISTORY = load_history()
@@ -273,7 +330,7 @@ class BrainThread(QThread):
                         headers = {"Authorization": f"Bearer {cf['api_token']}"}
                         
                         messages = [{"role": "system", "content": SYSTEM_PROMPT}]
-                        for q, a in CHAT_HISTORY[-3:]:
+                        for q, a in CHAT_HISTORY[-4:]:
                             messages.append({"role": "user", "content": q})
                             messages.append({"role": "assistant", "content": a})
                         messages.append({"role": "user", "content": query})
@@ -282,42 +339,46 @@ class BrainThread(QThread):
                         resp = requests.post(url, headers=headers, json=payload, timeout=8)
                         if resp.status_code == 200:
                             raw = resp.json().get("result", {}).get("response", "")
-                            ans = clean_text(raw) or "Сенеч, я здесь, слушаю тебя."
+                            ans = clean_text(raw) or "Я здесь, слушаю тебя."
                             CHAT_HISTORY.append((query, ans))
                             save_history(CHAT_HISTORY)
                         else:
-                            ans = "Сенеч, облачный сервер слегка задумался."
+                            ans = "Облако слегка задумалось, повтори ещё раз."
                     except Exception:
-                        ans = "Сенеч, связь с облаком барахлит, но я рядом."
+                        ans = "Связь с облачной сетью прервалась, но локальные системы в норме."
                 else:
-                    ans = "Сенеч, конфиг нейросети не найден."
+                    ans = "Конфигурация нейросети отсутствует."
 
         voice_text = ans.replace("Сенеч", "Се\u0301неч").replace("сенеч", "се\u0301неч")
         try:
             cmd = [
                 sys.executable, "-m", "edge_tts",
                 "--voice", "ru-RU-SvetlanaNeural",
-                "--pitch=+55Hz", "--rate=+12%",
+                "--pitch=+55Hz", "--rate=+10%",
                 f"--text={voice_text}", f"--write-media={AUDIO_PATH}"
             ]
             subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         except Exception: pass
 
-        dur = max(2.0, len(ans) / 14.0)
+        dur = max(2.5, len(ans) / 13.0)
         self.ready.emit(ans, AUDIO_PATH, dur, action_payload)
 
+# -------------------------------------------------------------
+# ГЛАВНАЯ КНОПКА НА РАБОЧЕМ СТОЛЕ (БЕЗ ПАНЕЛИ ЗАДАЧ И БЕЗ СВОРАЧИВАНИЯ)
+# -------------------------------------------------------------
 class FloatingDeckTrigger(QWidget):
     def __init__(self):
         super().__init__()
         self.hud_popup = None
         self.brain = None
-        self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnBottomHint | Qt.SubWindow)
-        self.setAttribute(Qt.WA_TranslucentBackground, True)
 
-        self.main_vbox = QVBoxLayout(self)
-        self.main_vbox.setContentsMargins(0, 0, 0, 0)
-        self.main_vbox.setSpacing(8)
-        self.main_vbox.setAlignment(Qt.AlignBottom | Qt.AlignRight)
+        # Убираем окно из панели задач, привязываем намертво к рабочему столу
+        self.setWindowFlags(Qt.Tool | Qt.FramelessWindowHint | Qt.WindowStaysOnBottomHint)
+        self.setAttribute(Qt.WA_TranslucentBackground, True)
+        self.setAttribute(Qt.WA_ShowWithoutActivating, True)
+
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
 
         self.btn_toggle = QPushButton("♥ ПОДРУГА", self)
         self.btn_toggle.setFixedSize(140, 36)
@@ -332,214 +393,273 @@ class FloatingDeckTrigger(QWidget):
             }
             QPushButton:hover { background: #ff77a9; color: #ffffff; }
         """)
-        self.btn_toggle.clicked.connect(self.toggle_input)
-        self.main_vbox.addWidget(self.btn_toggle, alignment=Qt.AlignRight)
-
-        self.input_field = QLineEdit(self)
-        self.input_field.setPlaceholderText("Приказ или вопрос...")
-        self.input_field.setFixedSize(260, 36)
-        self.input_field.setStyleSheet("""
-            QLineEdit {
-                background: rgba(18, 16, 26, 0.95);
-                color: #ffffff;
-                font-size: 13px;
-                border: 2px solid #ff77a9;
-                border-radius: 18px;
-                padding-left: 12px;
-                padding-right: 12px;
-            }
-        """)
-        self.input_field.returnPressed.connect(self.send_query)
-        self.input_field.hide()
-        self.main_vbox.addWidget(self.input_field, alignment=Qt.AlignRight)
+        self.btn_toggle.clicked.connect(self.toggle_chat)
+        layout.addWidget(self.btn_toggle)
 
         screen = QApplication.primaryScreen().geometry()
-        self.move(screen.width() - 320, screen.height() - 110)
+        # Фиксируем в правом нижнем углу
+        self.move(screen.width() - 170, screen.height() - 85)
 
-    def toggle_input(self):
-        if self.input_field.isVisible():
-            self.input_field.hide()
+    def showEvent(self, ev):
+        super().showEvent(ev)
+        # Убираем окно из всех списков окон оконного менеджера (Show Desktop не тронет)
+        try:
+            win_id = int(self.winId())
+            subprocess.run(["xprop", "-id", str(win_id), "-f", "_NET_WM_STATE", "32a",
+                            "-set", "_NET_WM_STATE", "_NET_WM_STATE_SKIP_TASKBAR,_NET_WM_STATE_SKIP_PAGER,_NET_WM_STATE_BELOW"],
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        except Exception:
+            pass
+
+    def toggle_chat(self):
+        if self.hud_popup and self.hud_popup.isVisible():
+            self.hud_popup.close()
+            self.hud_popup = None
         else:
-            self.input_field.show()
-            self.input_field.setFocus()
+            self.hud_popup = FloatingAiChatDialog(self)
+            self.hud_popup.show()
 
-    def send_query(self):
-        txt = self.input_field.text().strip()
-        if not txt: return
-        self.input_field.clear()
-        self.input_field.hide()
-
-        if self.hud_popup: self.hud_popup.close()
-        self.hud_popup = FloatingAiAnswer(txt)
-        self.hud_popup.show()
-        self.hud_popup.lower()
-
-        self.brain = BrainThread(txt)
-        self.brain.ready.connect(self.hud_popup.play_ai_answer)
-        self.brain.start()
-
-class FloatingAiAnswer(QWidget):
-    def __init__(self, user_text):
+# -------------------------------------------------------------
+# ДИАЛОГОВОЕ ОКНО ЧАТА С ИСТОРИЕЙ (НЕ ПРОПАДАЕТ САМО)
+# -------------------------------------------------------------
+class FloatingAiChatDialog(QWidget):
+    def __init__(self, parent_trigger):
         super().__init__()
-        self.user_text = user_text
+        self.parent_trigger = parent_trigger
         self.alarm_proc = None
+        self.countdown_timer = QTimer(self)
+        self.countdown_timer.timeout.connect(self.countdown_tick)
+        self.remaining_sec = 0
+        self.badge_title = "ТАЙМЕР"
 
-        self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnBottomHint | Qt.SubWindow)
+        # Не светим в панели задач
+        self.setWindowFlags(Qt.Tool | Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint)
         self.setAttribute(Qt.WA_TranslucentBackground, True)
-        self.setWindowOpacity(0.0)
 
-        self.setFixedWidth(820)
-        self.layout = QVBoxLayout(self)
-        self.layout.setContentsMargins(20, 10, 20, 10)
-        self.layout.setSpacing(8)
-        self.layout.setAlignment(Qt.AlignCenter)
+        self.setFixedSize(480, 560)
+        main_layout = QVBoxLayout(self)
+        main_layout.setContentsMargins(14, 14, 14, 14)
+        main_layout.setSpacing(10)
 
-        self.lbl_user = QLabel(f"« {self.user_text} »")
-        self.lbl_user.setAlignment(Qt.AlignCenter)
-        self.lbl_user.setWordWrap(True)
-        self.lbl_user.setStyleSheet("color: #d8b4fe; font-size: 15px; font-style: italic;")
-        self.layout.addWidget(self.lbl_user)
+        # Контейнер стиля
+        self.card = QFrame(self)
+        self.card.setStyleSheet("""
+            QFrame {
+                background: rgba(14, 12, 22, 0.96);
+                border: 2px solid #ff77a9;
+                border-radius: 16px;
+            }
+        """)
+        card_layout = QVBoxLayout(self.card)
+        card_layout.setContentsMargins(14, 12, 14, 12)
+        card_layout.setSpacing(8)
 
+        # Хедер с аватаркой, именем и кнопкой закрытия
+        header = QHBoxLayout()
         self.av_lbl = QLabel()
-        self.av_lbl.setAlignment(Qt.AlignCenter)
         img_path = find_anime_image()
         if img_path and os.path.exists(img_path):
             src_pix = QPixmap(img_path)
-            size = 140
+            size = 36
             scaled = src_pix.scaled(size, size, Qt.KeepAspectRatioByExpanding, Qt.SmoothTransformation)
             rounded = QPixmap(size, size)
             rounded.fill(Qt.transparent)
             painter = QPainter(rounded)
             painter.setRenderHint(QPainter.Antialiasing, True)
             path = QPainterPath()
-            path.addEllipse(4, 4, size-8, size-8)
+            path.addEllipse(0, 0, size, size)
             painter.setClipPath(path)
             painter.drawPixmap(0, 0, scaled)
             painter.end()
             self.av_lbl.setPixmap(rounded)
-        self.layout.addWidget(self.av_lbl, alignment=Qt.AlignCenter)
+        header.addWidget(self.av_lbl)
 
-        # Минималистичный бейдж
+        title_lbl = QLabel("АКЕМИ // ДЕК АССИСТЕНТ")
+        title_lbl.setStyleSheet("color: #ff77a9; font-size: 13px; font-weight: bold; border: none;")
+        header.addWidget(title_lbl)
+        header.addStretch()
+
+        btn_close = QPushButton("✕")
+        btn_close.setFixedSize(26, 26)
+        btn_close.setStyleSheet("""
+            QPushButton { background: transparent; color: #888899; font-size: 14px; font-weight: bold; border: none; }
+            QPushButton:hover { color: #ff5588; }
+        """)
+        btn_close.clicked.connect(self.close)
+        header.addWidget(btn_close)
+        card_layout.addLayout(header)
+
+        # Таймер бейдж (если взведен)
         self.timer_badge = QLabel("")
         self.timer_badge.setAlignment(Qt.AlignCenter)
         self.timer_badge.setStyleSheet("""
-            color: #00ffff;
-            font-family: monospace;
-            font-size: 19px;
-            font-weight: bold;
-            background: rgba(0, 255, 255, 0.06);
-            border: 1px solid rgba(0, 255, 255, 0.35);
-            border-radius: 6px;
-            padding: 3px 14px;
+            color: #00ffff; font-family: monospace; font-size: 15px; font-weight: bold;
+            background: rgba(0, 255, 255, 0.08); border: 1px solid rgba(0, 255, 255, 0.4);
+            border-radius: 6px; padding: 4px;
         """)
         self.timer_badge.hide()
-        self.layout.addWidget(self.timer_badge, alignment=Qt.AlignCenter)
-
-        self.lbl_sub = QLabel("слушаю тебя...")
-        self.lbl_sub.setAlignment(Qt.AlignCenter)
-        self.lbl_sub.setWordWrap(True)
-        self.lbl_sub.setStyleSheet("color: #fbcfe8; font-size: 16px; font-weight: 700; line-height: 1.4;")
-        self.layout.addWidget(self.lbl_sub)
+        card_layout.addWidget(self.timer_badge)
 
         self.prog_bar = QProgressBar()
-        self.prog_bar.setFixedSize(360, 5)
+        self.prog_bar.setFixedHeight(4)
         self.prog_bar.setTextVisible(False)
         self.prog_bar.setStyleSheet("""
-            QProgressBar { background: rgba(18, 16, 26, 0.8); border: 1px solid #ff77a9; border-radius: 2px; }
+            QProgressBar { background: rgba(18, 16, 26, 0.8); border: none; border-radius: 2px; }
             QProgressBar::chunk { background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #ff0077, stop:1 #00ffff); }
         """)
         self.prog_bar.hide()
-        self.layout.addWidget(self.prog_bar, alignment=Qt.AlignCenter)
+        card_layout.addWidget(self.prog_bar)
 
-        # Кнопка отмены
-        self.btn_abort = QPushButton("Отмена")
-        self.btn_abort.setFixedSize(100, 24)
-        self.btn_abort.setStyleSheet("""
-            QPushButton {
-                background: rgba(35, 15, 25, 0.85);
-                color: #ff5588;
-                border: 1px solid #ff5588;
-                font-size: 11px;
-                font-weight: bold;
-                border-radius: 12px;
-            }
-            QPushButton:hover { background: #ff5588; color: #ffffff; }
-        """)
-        self.btn_abort.clicked.connect(self.abort_command)
-        self.btn_abort.hide()
-        self.layout.addWidget(self.btn_abort, alignment=Qt.AlignCenter)
-
-        # Аккуратная кнопка выключения сигнала
-        self.btn_stop_alarm = QPushButton("Выключить")
-        self.btn_stop_alarm.setFixedSize(140, 32)
+        self.btn_stop_alarm = QPushButton("⏹ ВЫКЛЮЧИТЬ СИГНАЛ")
+        self.btn_stop_alarm.setFixedHeight(30)
         self.btn_stop_alarm.setStyleSheet("""
             QPushButton {
-                background: rgba(255, 119, 169, 0.15);
-                color: #ffffff;
-                border: 1px solid #ff77a9;
-                font-size: 13px;
-                font-weight: bold;
-                border-radius: 16px;
+                background: #ff0055; color: #ffffff; font-size: 12px; font-weight: bold;
+                border-radius: 15px; border: none;
             }
-            QPushButton:hover { background: #ff77a9; color: #12101a; }
+            QPushButton:hover { background: #ff3377; }
         """)
         self.btn_stop_alarm.clicked.connect(self.stop_alarm_sound)
         self.btn_stop_alarm.hide()
-        self.layout.addWidget(self.btn_stop_alarm, alignment=Qt.AlignCenter)
+        card_layout.addWidget(self.btn_stop_alarm)
 
-        self.adjustSize()
+        # Область сообщений со скроллом
+        self.scroll_area = QScrollArea()
+        self.scroll_area.setWidgetResizable(True)
+        self.scroll_area.setStyleSheet("""
+            QScrollArea { border: none; background: transparent; }
+            QScrollBar:vertical {
+                border: none; background: rgba(255, 255, 255, 0.05); width: 4px; border-radius: 2px;
+            }
+            QScrollBar::handle:vertical { background: #ff77a9; border-radius: 2px; }
+            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0px; }
+        """)
+        
+        self.chat_container = QWidget()
+        self.chat_container.setStyleSheet("background: transparent; border: none;")
+        self.chat_layout = QVBoxLayout(self.chat_container)
+        self.chat_layout.setContentsMargins(4, 4, 4, 4)
+        self.chat_layout.setSpacing(10)
+        self.chat_layout.addStretch()
+
+        self.scroll_area.setWidget(self.chat_container)
+        card_layout.addWidget(self.scroll_area)
+
+        # Поле ввода
+        input_box = QHBoxLayout()
+        self.input_field = QLineEdit()
+        self.input_field.setPlaceholderText("Команда или вопрос...")
+        self.input_field.setStyleSheet("""
+            QLineEdit {
+                background: rgba(25, 22, 36, 0.95);
+                color: #ffffff;
+                font-size: 13px;
+                border: 1px solid #ff77a9;
+                border-radius: 14px;
+                padding: 6px 12px;
+            }
+        """)
+        self.input_field.returnPressed.connect(self.handle_send)
+        input_box.addWidget(self.input_field)
+
+        btn_send = QPushButton("➤")
+        btn_send.setFixedSize(36, 32)
+        btn_send.setStyleSheet("""
+            QPushButton {
+                background: #ff77a9; color: #12101a; font-size: 14px; font-weight: bold;
+                border-radius: 14px; border: none;
+            }
+            QPushButton:hover { background: #ff99c2; }
+        """)
+        btn_send.clicked.connect(self.handle_send)
+        input_box.addWidget(btn_send)
+        card_layout.addLayout(input_box)
+
+        main_layout.addWidget(self.card)
+
+        # Размещение над кнопкой в правом углу
         screen = QApplication.primaryScreen().geometry()
-        self.base_y = (screen.height() // 2) + 20
-        self.move((screen.width() - self.width()) // 2, self.base_y)
+        self.move(screen.width() - self.width() - 25, screen.height() - self.height() - 90)
 
-        self.fade_in = QPropertyAnimation(self, b"windowOpacity")
-        self.fade_in.setDuration(250)
-        self.fade_in.setStartValue(0.0)
-        self.fade_in.setEndValue(1.0)
-        self.fade_in.start()
+        # Загрузка истории в чат
+        self.populate_history()
+        self.input_field.setFocus()
 
-        self.countdown_timer = QTimer(self)
-        self.countdown_timer.timeout.connect(self.countdown_tick)
-        self.remaining_sec = 0
-        self.badge_title = "ТАЙМЕР"
+    def populate_history(self):
+        for q, a in CHAT_HISTORY[-6:]:
+            self.append_message(q, is_user=True)
+            self.append_message(a, is_user=False)
+        self.scroll_to_bottom()
 
-    def play_ai_answer(self, ai_text, audio_path, duration, action_payload):
-        self.full_ai_text = ai_text
-        self.audio_path = audio_path
-        self.duration = duration
-        self.char_idx = 0
-        self.lbl_sub.setStyleSheet("color: #38bdf8; font-size: 16px; font-weight: 700; line-height: 1.4;")
+    def append_message(self, text, is_user=False):
+        bubble = QLabel(text)
+        bubble.setWordWrap(True)
+        if is_user:
+            bubble.setStyleSheet("""
+                QLabel {
+                    background: rgba(255, 119, 169, 0.12);
+                    color: #d8b4fe;
+                    font-size: 13px;
+                    border: 1px solid rgba(255, 119, 169, 0.25);
+                    border-radius: 10px;
+                    padding: 6px 10px;
+                }
+            """)
+            self.chat_layout.addWidget(bubble, alignment=Qt.AlignRight)
+        else:
+            bubble.setStyleSheet("""
+                QLabel {
+                    background: rgba(26, 32, 54, 0.8);
+                    color: #e0f2fe;
+                    font-size: 13px;
+                    border: 1px solid rgba(56, 189, 248, 0.25);
+                    border-radius: 10px;
+                    padding: 6px 10px;
+                }
+            """)
+            self.chat_layout.addWidget(bubble, alignment=Qt.AlignLeft)
+        self.scroll_to_bottom()
 
-        if os.path.exists(self.audio_path):
-            subprocess.Popen(["mpv", "--no-video", "--really-quiet", self.audio_path])
+    def scroll_to_bottom(self):
+        QTimer.singleShot(50, lambda: self.scroll_area.verticalScrollBar().setValue(
+            self.scroll_area.verticalScrollBar().maximum()
+        ))
 
-        total_chars = max(1, len(self.full_ai_text))
-        char_interval = int(max(15, ((self.duration - 0.2) * 1000) / total_chars))
+    def handle_send(self):
+        txt = self.input_field.text().strip()
+        if not txt: return
+        self.input_field.clear()
 
-        self.type_timer = QTimer(self)
-        self.type_timer.timeout.connect(self.typewriter_step)
-        self.type_timer.start(char_interval)
+        self.append_message(txt, is_user=True)
 
-        if action_payload:
-            self.handle_action(action_payload)
+        self.brain = BrainThread(txt)
+        self.brain.ready.connect(self.on_brain_reply)
+        self.brain.start()
+
+    def on_brain_reply(self, reply, audio, dur, act):
+        self.append_message(reply, is_user=False)
+
+        if os.path.exists(audio):
+            subprocess.Popen(["mpv", "--no-video", "--really-quiet", audio])
+
+        if act:
+            self.handle_action(act)
 
     def handle_action(self, act):
         t = act["type"]
-        if t == "stop_alarm":
-            self.stop_alarm_sound()
-        elif t == "open_app":
-            subprocess.Popen([act["cmd"]], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        elif t == "open_url":
-            subprocess.Popen(["xdg-open", act["url"]], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        elif t == "open_music":
-            open_music_app()
+        if t == "stop_alarm": self.stop_alarm_sound()
+        elif t == "open_tg": launch_telegram()
+        elif t == "open_yt": launch_browser("https://youtube.com")
+        elif t == "open_browser": launch_browser()
+        elif t == "search_web": launch_browser(f"https://ya.ru/search/?text={act['query']}")
+        elif t == "open_music": open_music_app()
+        elif t == "open_app_cmd": subprocess.Popen([act["cmd"]], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         elif t == "sleep_mode":
             subprocess.run(["playerctl", "pause"], stderr=subprocess.DEVNULL)
-            QTimer.singleShot(2500, lambda: subprocess.run(["xset", "dpms", "force", "off"]))
+            QTimer.singleShot(2000, lambda: subprocess.run(["xset", "dpms", "force", "off"]))
         elif t == "screenshot":
-            pic_path = os.path.expanduser(f"~/Изображения/deck_{int(time.time())}.png")
-            os.makedirs(os.path.dirname(pic_path), exist_ok=True)
-            subprocess.run(["scrot", pic_path], stderr=subprocess.DEVNULL)
+            pic = os.path.expanduser(f"~/Изображения/deck_{int(time.time())}.png")
+            subprocess.run(["scrot", pic], stderr=subprocess.DEVNULL)
         elif t == "media_next": subprocess.run(["playerctl", "next"])
         elif t == "media_prev": subprocess.run(["playerctl", "previous"])
         elif t == "media_pause": subprocess.run(["playerctl", "pause"])
@@ -548,9 +668,9 @@ class FloatingAiAnswer(QWidget):
         elif t == "vol_up": subprocess.run(["pamixer", "-i", "5"])
         elif t == "vol_down": subprocess.run(["pamixer", "-d", "5"])
         elif t == "screen_off":
-            QTimer.singleShot(2500, lambda: subprocess.run(["xset", "dpms", "force", "off"]))
+            QTimer.singleShot(2000, lambda: subprocess.run(["xset", "dpms", "force", "off"]))
         elif t == "lock":
-            QTimer.singleShot(1500, lambda: subprocess.run(["cinnamon-screensaver-command", "--lock"]))
+            QTimer.singleShot(1000, lambda: subprocess.run(["cinnamon-screensaver-command", "--lock"]))
         elif t == "alarm":
             self.start_timer_mode(act["seconds"], f"БУДИЛЬНИК {act['target_str']}")
         elif t == "timer":
@@ -567,14 +687,11 @@ class FloatingAiAnswer(QWidget):
         self.prog_bar.setRange(0, seconds)
         self.prog_bar.setValue(seconds)
         self.prog_bar.show()
-        self.btn_abort.show()
 
         mins = seconds // 60
         secs = seconds % 60
         self.timer_badge.setText(f"[ {self.badge_title} | {mins:02d}:{secs:02d} ]")
         self.timer_badge.show()
-
-        self.adjust_position()
         self.countdown_timer.start(1000)
 
     def countdown_tick(self):
@@ -587,28 +704,10 @@ class FloatingAiAnswer(QWidget):
         if self.remaining_sec <= 0:
             self.countdown_timer.stop()
             self.prog_bar.hide()
-            self.btn_abort.hide()
-            
-            final_title = "БУДИЛЬНИК" if "БУДИЛЬНИК" in self.badge_title else "ТАЙМЕР"
-            self.timer_badge.setText(f"[ {final_title} ]")
-            self.timer_badge.setStyleSheet("""
-                color: #ff77a9;
-                font-family: monospace;
-                font-size: 19px;
-                font-weight: bold;
-                background: rgba(255, 119, 169, 0.08);
-                border: 1px solid rgba(255, 119, 169, 0.4);
-                border-radius: 6px;
-                padding: 3px 14px;
-            """)
-            
+            self.timer_badge.setText(f"[ ВРЕМЯ ВЫШЛО ]")
             if os.path.exists(ALARM_SOUND):
                 self.alarm_proc = subprocess.Popen(["mpv", "--loop=inf", "--really-quiet", "--volume=100", ALARM_SOUND])
-            
             self.btn_stop_alarm.show()
-            self.lbl_sub.setText("Сенеч, время вышло.")
-            self.adjust_position()
-
             if getattr(self, "pending_exec", None):
                 self.pending_exec()
 
@@ -619,57 +718,9 @@ class FloatingAiAnswer(QWidget):
         subprocess.run(["pkill", "-f", "alarm_sound.wav"])
         self.btn_stop_alarm.hide()
         self.timer_badge.hide()
-        self.lbl_sub.setText("Сигнал отключен.")
-        QTimer.singleShot(2000, self.start_fade_out)
-
-    def abort_command(self):
-        self.countdown_timer.stop()
-        if self.alarm_proc:
-            self.alarm_proc.terminate()
-            self.alarm_proc = None
-        subprocess.run(["pkill", "-f", "alarm_sound.wav"])
-        self.prog_bar.hide()
-        self.btn_abort.hide()
-        self.timer_badge.hide()
-        self.lbl_sub.setText("Отменено.")
-        QTimer.singleShot(1500, self.start_fade_out)
-
-    def typewriter_step(self):
-        if self.char_idx < len(self.full_ai_text):
-            self.char_idx += 1
-            self.lbl_sub.setText(self.full_ai_text[:self.char_idx] + "▌")
-        else:
-            self.type_timer.stop()
-            self.lbl_sub.setText(self.full_ai_text)
-            self.adjust_position()
-            if not self.countdown_timer.isActive() and not self.alarm_proc:
-                QTimer.singleShot(5000, self.start_fade_out)
-
-    def adjust_position(self):
-        self.adjustSize()
-        screen = QApplication.primaryScreen().geometry()
-        self.move((screen.width() - self.width()) // 2, self.base_y)
-
-    def start_fade_out(self):
-        self.anim_group = QParallelAnimationGroup(self)
-        fade = QPropertyAnimation(self, b"windowOpacity")
-        fade.setDuration(500)
-        fade.setStartValue(1.0)
-        fade.setEndValue(0.0)
-
-        slide = QPropertyAnimation(self, b"pos")
-        slide.setDuration(500)
-        slide.setStartValue(self.pos())
-        slide.setEndValue(QPoint(self.x(), self.base_y + 20))
-
-        self.anim_group.addAnimation(fade)
-        self.anim_group.addAnimation(slide)
-        self.anim_group.finished.connect(self.close)
-        self.anim_group.start()
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
     w = FloatingDeckTrigger()
     w.show()
-    w.lower()
     sys.exit(app.exec_())
