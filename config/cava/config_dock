@@ -1,0 +1,15 @@
+[general]
+framerate = 60
+bars = 64
+lower_cutoff_freq = 45
+higher_cutoff_freq = 11000
+
+[output]
+method = raw
+raw_target = /dev/stdout
+data_format = binary
+bit_format = 8bit
+
+[input]
+method = pulse
+source = auto

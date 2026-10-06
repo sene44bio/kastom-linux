@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Exec=python3 /home/sene44/.config/hud/ai_voice_chat.py
+Hidden=false
+NoDisplay=false
+X-GNOME-Autostart-enabled=true
+Name=AI Deck Assistant
+Comment=Desktop Companion
