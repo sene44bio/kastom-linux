@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Exec=/home/sene44/.config/startup-sfx/launch_full_intro.sh
+Hidden=false
+NoDisplay=false
+X-GNOME-Autostart-enabled=true
+Name=Cyber Deck Intro
+Comment=Startup eDEX-UI Animation and Welcome Screen
