@@ -28,7 +28,7 @@ SYNONYMS = {
     "media_next": ["дальше", "некст", "следующий", "след", "переключи"],
     "media_prev": ["назад", "предыдущий", "пред"],
     "media_pause": ["стоп", "пауза", "замри", "останови", "заткнись", "тишина", "хватит", "молчи"],
-    "media_play": ["продолжи", "плей", "играй", "включи музыку", "запусти музыку"],
+    "media_play": ["продолжи", "плей", "играй"],
     "vol_up": ["громче", "прибавь", "погромче", "добавь звук", "сделай громче"],
     "vol_down": ["тише", "убавь", "потише", "сделай тише", "приглуши"],
     "intent_alarm": ["будильник", "разбуди", "подъем"],
@@ -61,15 +61,19 @@ def get_system_stats():
     try:
         cpu = subprocess.check_output("top -bn1 | grep 'Cpu(s)' | awk '{print $2}'", shell=True).decode().strip()
         ram = subprocess.check_output("free -m | awk '/Mem:/ {printf(\"%.1f/%.1f ГБ\", $3/1024, $2/1024)}'", shell=True).decode().strip()
-        return f"Процессор нагружен на {cpu} процентов, память занята на {ram}. Дека работает стабильно, Сенеч!"
+        return f"Процессор нагружен на {cpu} процентов, память занята на {ram}."
     except Exception:
-        return "Все датчики в зеленой зоне, станция функционирует штатно."
+        return "Система работает стабильно, все показатели в норме."
+
+def open_music_app():
+    subprocess.Popen([
+        "sh", "-c",
+        "which yandex-music >/dev/null && yandex-music || (flatpak run ru.yandex.YandexMusic 2>/dev/null || xdg-open https://music.yandex.ru)"
+    ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 def parse_alarm_target(text):
     t = text.lower()
     now = datetime.now()
-
-    # Поиск шаблонов: "на 23 25", "на 23:25", "в 8:00", "в 7 утра", "на 8 вечера"
     m = re.search(r'(?:на|в)\s+(\d{1,2})(?:[:\s\.](\d{2}))?', t)
     if m:
         h = int(m.group(1))
@@ -126,19 +130,34 @@ def parse_system_intent(text):
     p = text.lower().strip()
     has = lambda grp: any(w in p for w in SYNONYMS[grp])
 
-    # Глушение любого играющего будильника
-    if any(w in p for w in ["заткнись", "выключи сигнал", "выруби будильник", "хватит орать", "стоп сигнал"]):
-        return {"type": "stop_alarm_sound", "reply": "Сигнал выключен, отдыхай дальше, Сенеч."}
+    # Глушение звука будильника/таймера
+    if any(w in p for w in ["заткнись", "выключи сигнал", "выруби будильник", "стоп сигнал", "хватит"]):
+        return {"type": "stop_alarm", "reply": "Выключила сигнал, Сенеч."}
 
-    # Режим "Отбой / Спать"
+    # Запуск приложений
+    if any(w in p for w in ["открой", "запусти", "вруби", "включи"]):
+        if any(x in p for x in ["телеграм", "телеге", "телегу", "тг"]):
+            return {"type": "open_app", "cmd": "telegram-desktop", "reply": "Открываю Телеграм."}
+        if any(x in p for x in ["ютуб", "youtube"]):
+            return {"type": "open_url", "url": "https://youtube.com", "reply": "Запускаю Ютуб."}
+        if any(x in p for x in ["музыку", "яндекс музыку", "треки"]):
+            return {"type": "open_music", "reply": "Включаю Яндекс Музыку."}
+        if any(x in p for x in ["браузер", "хром", "яндекс"]):
+            return {"type": "open_app", "cmd": "x-www-browser", "reply": "Открываю браузер."}
+        if any(x in p for x in ["код", "cursor", "vscode"]):
+            return {"type": "open_app", "cmd": "cursor", "reply": "Открываю среду разработки."}
+        if any(x in p for x in ["терминал", "консоль"]):
+            return {"type": "open_app", "cmd": "gnome-terminal", "reply": "Терминал запущен."}
+
+    # Режим сна
     if has("intent_sleep"):
-        return {"type": "sleep_mode", "reply": "Спокойной ночи, Сенеч. Гашу станцию до твоего пробуждения."}
+        return {"type": "sleep_mode", "reply": "Спокойной ночи, Сенеч. Отключаю экраны."}
 
-    # Скриншот рабочего стола
+    # Скриншот
     if has("intent_screenshot"):
-        return {"type": "screenshot", "reply": "Сделала снимок экрана и сохранила в Изображения."}
+        return {"type": "screenshot", "reply": "Сделала скриншот рабочего стола."}
 
-    # Статус железа
+    # Статистика
     if has("intent_stats"):
         return {"type": "stats", "reply": get_system_stats()}
 
@@ -146,51 +165,51 @@ def parse_system_intent(text):
     if has("intent_weather"):
         return {"type": "weather", "reply": get_real_weather()}
 
-    # Будильник по времени часов (на 23 25 / на 8:00)
+    # Будильник
     if has("intent_alarm"):
         diff, t_str = parse_alarm_target(p)
         if diff:
-            return {"type": "alarm", "seconds": diff, "target_str": t_str, "reply": f"Будильник на {t_str} установлен. Я разбужу тебя вовремя!"}
+            return {"type": "alarm", "seconds": diff, "target_str": t_str, "reply": f"Будильник на {t_str} установлен."}
         else:
             sec = parse_timer_seconds(p)
             txt_desc = f"{sec // 60} мин" if sec >= 60 and sec % 60 == 0 else f"{sec} сек"
-            return {"type": "timer", "seconds": sec, "reply": f"Будильник через {txt_desc} взведён. Прослежу за временем!"}
+            return {"type": "alarm", "seconds": sec, "target_str": txt_desc, "reply": f"Будильник через {txt_desc} взведён."}
 
-    # Обычный таймер
+    # Таймер
     if has("intent_timer"):
         sec = parse_timer_seconds(p)
         txt_desc = f"{sec // 60} мин" if sec >= 60 and sec % 60 == 0 else f"{sec} сек"
-        return {"type": "timer", "seconds": sec, "reply": f"Таймер на {txt_desc} пошел. Время пошло, Сенеч!"}
+        return {"type": "timer", "seconds": sec, "reply": f"Таймер на {txt_desc} запущен."}
 
-    # Музыка
-    if has("media_next"): return {"type": "media_next", "reply": "Следующий трек, Сенеч."}
-    if has("media_prev"): return {"type": "media_prev", "reply": "Возвращаю трек назад."}
+    # Мультимедиа
+    if has("media_next"): return {"type": "media_next", "reply": "Следующий трек."}
+    if has("media_prev"): return {"type": "media_prev", "reply": "Предыдущий трек."}
     if has("media_pause"): return {"type": "media_pause", "reply": "Музыка на паузе."}
-    if has("media_play"): return {"type": "media_play", "reply": "Врубила музло дальше!"}
+    if has("media_play"): return {"type": "media_play", "reply": "Продолжаю воспроизведение."}
 
     # Громкость
     if "максимум" in p or "на всю" in p:
-        return {"type": "set_vol", "val": 100, "reply": "Громкость на максимум, погнали!"}
+        return {"type": "set_vol", "val": 100, "reply": "Громкость на максимум."}
     if "без звука" in p or "мут" in p:
-        return {"type": "set_vol", "val": 0, "reply": "Звук полностью заглушен."}
-    if has("vol_up"): return {"type": "vol_up", "reply": "Сделала громче на пять процентов."}
-    if has("vol_down"): return {"type": "vol_down", "reply": "Сделала тише на пять процентов."}
+        return {"type": "set_vol", "val": 0, "reply": "Звук отключен."}
+    if has("vol_up"): return {"type": "vol_up", "reply": "Громкость плюс пять процентов."}
+    if has("vol_down"): return {"type": "vol_down", "reply": "Громкость минус пять процентов."}
     if "громкость" in p or "звук" in p:
         m = re.search(r'(\d+)', p)
         if m:
             v = int(m.group(1))
-            return {"type": "set_vol", "val": v, "reply": f"Выставила громкость на {v} процентов."}
+            return {"type": "set_vol", "val": v, "reply": f"Громкость {v} процентов."}
 
-    # Экран и ПК
+    # Питание
     if any(w in p for w in SYNONYMS["action_off"]) and any(w in p for w in SYNONYMS["target_screen"]):
-        return {"type": "screen_off", "reply": "Гашу монитор, береги глаза, Сенеч."}
+        return {"type": "screen_off", "reply": "Выключаю монитор."}
     if has("action_lock"):
-        return {"type": "lock", "reply": "Блокирую дек, доступ закрыт."}
+        return {"type": "lock", "reply": "Блокирую систему."}
     if any(w in p for w in SYNONYMS["action_off"]) and any(w in p for w in ["пк", "комп", "пекарню", "систему", "тачку"]):
         sec = parse_timer_seconds(p) if any(x in p for x in ["через", "на"]) else 5
-        return {"type": "shutdown", "seconds": sec, "reply": f"Выключаю станцию через {sec} секунд."}
+        return {"type": "shutdown", "seconds": sec, "reply": f"Выключаю ПК через {sec} секунд."}
     if has("action_reboot"):
-        return {"type": "reboot", "seconds": 5, "reply": "Перезагружаю систему, скоро вернусь."}
+        return {"type": "reboot", "seconds": 5, "reply": "Перезагружаю систему."}
 
     return None
 
@@ -374,7 +393,7 @@ class FloatingAiAnswer(QWidget):
         self.setAttribute(Qt.WA_TranslucentBackground, True)
         self.setWindowOpacity(0.0)
 
-        self.setFixedWidth(840)
+        self.setFixedWidth(820)
         self.layout = QVBoxLayout(self)
         self.layout.setContentsMargins(20, 10, 20, 10)
         self.layout.setSpacing(8)
@@ -405,18 +424,18 @@ class FloatingAiAnswer(QWidget):
             self.av_lbl.setPixmap(rounded)
         self.layout.addWidget(self.av_lbl, alignment=Qt.AlignCenter)
 
-        # Неоновый таймер / будильник
+        # Минималистичный бейдж
         self.timer_badge = QLabel("")
         self.timer_badge.setAlignment(Qt.AlignCenter)
         self.timer_badge.setStyleSheet("""
             color: #00ffff;
             font-family: monospace;
-            font-size: 22px;
-            font-weight: 900;
-            background: rgba(0, 255, 255, 0.08);
-            border: 1px solid rgba(0, 255, 255, 0.4);
-            border-radius: 8px;
-            padding: 4px 16px;
+            font-size: 19px;
+            font-weight: bold;
+            background: rgba(0, 255, 255, 0.06);
+            border: 1px solid rgba(0, 255, 255, 0.35);
+            border-radius: 6px;
+            padding: 3px 14px;
         """)
         self.timer_badge.hide()
         self.layout.addWidget(self.timer_badge, alignment=Qt.AlignCenter)
@@ -424,30 +443,30 @@ class FloatingAiAnswer(QWidget):
         self.lbl_sub = QLabel("слушаю тебя...")
         self.lbl_sub.setAlignment(Qt.AlignCenter)
         self.lbl_sub.setWordWrap(True)
-        self.lbl_sub.setStyleSheet("color: #fbcfe8; font-size: 17px; font-weight: 700; line-height: 1.4;")
+        self.lbl_sub.setStyleSheet("color: #fbcfe8; font-size: 16px; font-weight: 700; line-height: 1.4;")
         self.layout.addWidget(self.lbl_sub)
 
         self.prog_bar = QProgressBar()
-        self.prog_bar.setFixedSize(380, 6)
+        self.prog_bar.setFixedSize(360, 5)
         self.prog_bar.setTextVisible(False)
         self.prog_bar.setStyleSheet("""
-            QProgressBar { background: rgba(18, 16, 26, 0.8); border: 1px solid #ff77a9; border-radius: 3px; }
+            QProgressBar { background: rgba(18, 16, 26, 0.8); border: 1px solid #ff77a9; border-radius: 2px; }
             QProgressBar::chunk { background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #ff0077, stop:1 #00ffff); }
         """)
         self.prog_bar.hide()
         self.layout.addWidget(self.prog_bar, alignment=Qt.AlignCenter)
 
-        # Кнопка отмены таймера
+        # Кнопка отмены
         self.btn_abort = QPushButton("Отмена")
-        self.btn_abort.setFixedSize(110, 26)
+        self.btn_abort.setFixedSize(100, 24)
         self.btn_abort.setStyleSheet("""
             QPushButton {
                 background: rgba(35, 15, 25, 0.85);
                 color: #ff5588;
                 border: 1px solid #ff5588;
-                font-size: 12px;
+                font-size: 11px;
                 font-weight: bold;
-                border-radius: 13px;
+                border-radius: 12px;
             }
             QPushButton:hover { background: #ff5588; color: #ffffff; }
         """)
@@ -455,20 +474,19 @@ class FloatingAiAnswer(QWidget):
         self.btn_abort.hide()
         self.layout.addWidget(self.btn_abort, alignment=Qt.AlignCenter)
 
-        # Кнопка ВЫКЛЮЧЕНИЯ БУДИЛЬНИКА
-        self.btn_stop_alarm = QPushButton("⏹ ВЫКЛЮЧИТЬ СИГНАЛ")
-        self.btn_stop_alarm.setFixedSize(240, 38)
+        # Аккуратная кнопка выключения сигнала
+        self.btn_stop_alarm = QPushButton("Выключить")
+        self.btn_stop_alarm.setFixedSize(140, 32)
         self.btn_stop_alarm.setStyleSheet("""
             QPushButton {
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #ff0055, stop:1 #ff5500);
+                background: rgba(255, 119, 169, 0.15);
                 color: #ffffff;
-                font-size: 14px;
-                font-weight: 900;
-                font-family: monospace;
-                border: 2px solid #ffffff;
-                border-radius: 19px;
+                border: 1px solid #ff77a9;
+                font-size: 13px;
+                font-weight: bold;
+                border-radius: 16px;
             }
-            QPushButton:hover { background: #ffffff; color: #ff0055; }
+            QPushButton:hover { background: #ff77a9; color: #12101a; }
         """)
         self.btn_stop_alarm.clicked.connect(self.stop_alarm_sound)
         self.btn_stop_alarm.hide()
@@ -488,14 +506,14 @@ class FloatingAiAnswer(QWidget):
         self.countdown_timer = QTimer(self)
         self.countdown_timer.timeout.connect(self.countdown_tick)
         self.remaining_sec = 0
-        self.alarm_label_prefix = ""
+        self.badge_title = "ТАЙМЕР"
 
     def play_ai_answer(self, ai_text, audio_path, duration, action_payload):
         self.full_ai_text = ai_text
         self.audio_path = audio_path
         self.duration = duration
         self.char_idx = 0
-        self.lbl_sub.setStyleSheet("color: #38bdf8; font-size: 17px; font-weight: 700; line-height: 1.4;")
+        self.lbl_sub.setStyleSheet("color: #38bdf8; font-size: 16px; font-weight: 700; line-height: 1.4;")
 
         if os.path.exists(self.audio_path):
             subprocess.Popen(["mpv", "--no-video", "--really-quiet", self.audio_path])
@@ -512,9 +530,14 @@ class FloatingAiAnswer(QWidget):
 
     def handle_action(self, act):
         t = act["type"]
-        if t == "stop_alarm_sound":
-            subprocess.run(["pkill", "-f", "alarm_sound.wav"])
+        if t == "stop_alarm":
             self.stop_alarm_sound()
+        elif t == "open_app":
+            subprocess.Popen([act["cmd"]], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        elif t == "open_url":
+            subprocess.Popen(["xdg-open", act["url"]], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        elif t == "open_music":
+            open_music_app()
         elif t == "sleep_mode":
             subprocess.run(["playerctl", "pause"], stderr=subprocess.DEVNULL)
             QTimer.singleShot(2500, lambda: subprocess.run(["xset", "dpms", "force", "off"]))
@@ -534,7 +557,7 @@ class FloatingAiAnswer(QWidget):
         elif t == "lock":
             QTimer.singleShot(1500, lambda: subprocess.run(["cinnamon-screensaver-command", "--lock"]))
         elif t == "alarm":
-            self.start_timer_mode(act["seconds"], f"БУДИЛЬНИК: {act['target_str']}")
+            self.start_timer_mode(act["seconds"], f"БУДИЛЬНИК {act['target_str']}")
         elif t == "timer":
             self.start_timer_mode(act["seconds"], "ТАЙМЕР")
         elif t == "shutdown":
@@ -542,9 +565,9 @@ class FloatingAiAnswer(QWidget):
         elif t == "reboot":
             self.start_timer_mode(act["seconds"], "ПЕРЕЗАГРУЗКА", lambda: subprocess.run(["systemctl", "reboot"]))
 
-    def start_timer_mode(self, seconds, prefix="ТАЙМЕР", callback=None):
+    def start_timer_mode(self, seconds, title="ТАЙМЕР", callback=None):
         self.remaining_sec = seconds
-        self.alarm_label_prefix = prefix
+        self.badge_title = title
         self.pending_exec = callback
         self.prog_bar.setRange(0, seconds)
         self.prog_bar.setValue(seconds)
@@ -553,7 +576,7 @@ class FloatingAiAnswer(QWidget):
 
         mins = seconds // 60
         secs = seconds % 60
-        self.timer_badge.setText(f"[ {self.alarm_label_prefix} | {mins:02d}:{secs:02d} ]")
+        self.timer_badge.setText(f"[ {self.badge_title} | {mins:02d}:{secs:02d} ]")
         self.timer_badge.show()
 
         self.adjust_position()
@@ -564,30 +587,32 @@ class FloatingAiAnswer(QWidget):
         self.prog_bar.setValue(self.remaining_sec)
         m = self.remaining_sec // 60
         s = self.remaining_sec % 60
-        self.timer_badge.setText(f"[ {self.alarm_label_prefix} | {m:02d}:{s:02d} ]")
+        self.timer_badge.setText(f"[ {self.badge_title} | {m:02d}:{s:02d} ]")
 
         if self.remaining_sec <= 0:
             self.countdown_timer.stop()
             self.prog_bar.hide()
             self.btn_abort.hide()
-            self.timer_badge.setText("[ СИГНАЛ ТРЕВОГИ / ПОДЪЕМ ]")
+            
+            # Лаконичный бейдж по завершению
+            final_title = "БУДИЛЬНИК" if "БУДИЛЬНИК" in self.badge_title else "ТАЙМЕР"
+            self.timer_badge.setText(f"[ {final_title} ]")
             self.timer_badge.setStyleSheet("""
-                color: #ff0055;
+                color: #ff77a9;
                 font-family: monospace;
-                font-size: 22px;
-                font-weight: 900;
-                background: rgba(255, 0, 85, 0.15);
-                border: 2px solid #ff0055;
-                border-radius: 8px;
-                padding: 4px 16px;
+                font-size: 19px;
+                font-weight: bold;
+                background: rgba(255, 119, 169, 0.08);
+                border: 1px solid rgba(255, 119, 169, 0.4);
+                border-radius: 6px;
+                padding: 3px 14px;
             """)
             
-            # Бесконечный луп сирены
             if os.path.exists(ALARM_SOUND):
                 self.alarm_proc = subprocess.Popen(["mpv", "--loop=inf", "--really-quiet", "--volume=100", ALARM_SOUND])
             
             self.btn_stop_alarm.show()
-            self.lbl_sub.setText("Сенеч, время пришло! Нажми кнопку или скажи Хватит!")
+            self.lbl_sub.setText("Сенеч, время вышло.")
             self.adjust_position()
 
             if getattr(self, "pending_exec", None):
@@ -600,8 +625,8 @@ class FloatingAiAnswer(QWidget):
         subprocess.run(["pkill", "-f", "alarm_sound.wav"])
         self.btn_stop_alarm.hide()
         self.timer_badge.hide()
-        self.lbl_sub.setText("Сигнал выключен. Отличного дня, Сенеч!")
-        QTimer.singleShot(2500, self.start_fade_out)
+        self.lbl_sub.setText("Сигнал отключен.")
+        QTimer.singleShot(2000, self.start_fade_out)
 
     def abort_command(self):
         self.countdown_timer.stop()
@@ -612,8 +637,8 @@ class FloatingAiAnswer(QWidget):
         self.prog_bar.hide()
         self.btn_abort.hide()
         self.timer_badge.hide()
-        self.lbl_sub.setText("Действие отменено.")
-        QTimer.singleShot(2000, self.start_fade_out)
+        self.lbl_sub.setText("Отменено.")
+        QTimer.singleShot(1500, self.start_fade_out)
 
     def typewriter_step(self):
         if self.char_idx < len(self.full_ai_text):
@@ -624,7 +649,7 @@ class FloatingAiAnswer(QWidget):
             self.lbl_sub.setText(self.full_ai_text)
             self.adjust_position()
             if not self.countdown_timer.isActive() and not self.alarm_proc:
-                QTimer.singleShot(6000, self.start_fade_out)
+                QTimer.singleShot(5000, self.start_fade_out)
 
     def adjust_position(self):
         self.adjustSize()
@@ -634,14 +659,14 @@ class FloatingAiAnswer(QWidget):
     def start_fade_out(self):
         self.anim_group = QParallelAnimationGroup(self)
         fade = QPropertyAnimation(self, b"windowOpacity")
-        fade.setDuration(600)
+        fade.setDuration(500)
         fade.setStartValue(1.0)
         fade.setEndValue(0.0)
 
         slide = QPropertyAnimation(self, b"pos")
-        slide.setDuration(600)
+        slide.setDuration(500)
         slide.setStartValue(self.pos())
-        slide.setEndValue(QPoint(self.x(), self.base_y + 25))
+        slide.setEndValue(QPoint(self.x(), self.base_y + 20))
 
         self.anim_group.addAnimation(fade)
         self.anim_group.addAnimation(slide)
