@@ -4,7 +4,7 @@ from PyQt5.QtWidgets import (
     QApplication, QWidget, QLabel, QVBoxLayout, QHBoxLayout, 
     QLineEdit, QPushButton, QProgressBar, QScrollArea, QFrame
 )
-from PyQt5.QtCore import Qt, QTimer, QPropertyAnimation, pyqtSignal, QThread, QPoint
+from PyQt5.QtCore import Qt, QTimer, QPropertyAnimation, QParallelAnimationGroup, pyqtSignal, QThread, QPoint
 from PyQt5.QtGui import QPixmap, QPainter, QPainterPath
 
 CF_CONFIG_FILE = os.path.expanduser("~/.config/hud/cf_config.json")
@@ -14,9 +14,9 @@ ALARM_SOUND = os.path.expanduser("~/.config/hud/alarm_sound.wav")
 
 SYSTEM_PROMPT = """Ты — Акеми, харизматичная, ироничная и преданная цифровая напарница парня по имени Сенеч.
 Ты встроена в его кастомный киберпанк-дек на базе Linux.
-1. Твой собеседник — Сенеч. Общайся свободно, остроумно, по-дружески, без приторной ванильности и сюсюканья.
-2. Не строй из себя глупого робота. Отвечай развернуто, емко и по факту, поддерживай диалог живо.
-3. КАТЕГОРИЧЕСКИ ЗАПРЕЩЕНО писать любые эмодзи, смайлики (включая скобки ), кавычки и звездочки. Только чистый текст на русском языке."""
+1. Твой собеседник — Сенеч. Общайся свободно, остроумно, по-дружески, без приторной ванильности.
+2. Отвечай развернуто, емко, интересно и доводи мысль до конца.
+3. КАТЕГОРИЧЕСКИ ЗАПРЕЩЕНО писать любые эмодзи, смайлики (включая скобки ), кавычки и звездочки. Только чистый русский текст."""
 
 SYNONYMS = {
     "action_off": ["выключи", "выруби", "офни", "погаси", "потуши", "загаси", "вырубай", "отключи", "выключить"],
@@ -61,10 +61,10 @@ def get_real_weather():
             d = r.json()
             temp = d["current_condition"][0]["temp_C"]
             desc = d["current_condition"][0]["lang_ru"][0]["value"].lower()
-            return f"В Екатеринбурге сейчас {temp} градусов, {desc}. На улице бодрит, Сенеч."
+            return f"В Екатеринбурге сейчас {temp} градусов, {desc}. На улице свежо, Сенеч."
     except Exception:
         pass
-    return "В Екатеринбурге морозно и свежо, держись в тепле, Сенеч."
+    return "В Екатеринбурге прохладно и морозно, держись в тепле, Сенеч."
 
 def get_system_stats():
     try:
@@ -172,18 +172,15 @@ def parse_system_intent(text):
     if any(w in p for w in ["заткнись", "выключи сигнал", "выруби будильник", "стоп сигнал", "хватит"]):
         return {"type": "stop_alarm", "reply": "Сигнал отключен."}
 
-    # Поиск в сети
     search_m = re.search(r'(?:найди|гугли|поищи)\s+(.+)', p)
     if search_m:
         q = search_m.group(1).strip()
         return {"type": "search_web", "query": q, "reply": f"Ищу информацию по запросу {q}."}
 
-    # Закрытие приложений
     if any(w in p for w in ["закрой", "прикрой", "выруби приложение", "убей"]):
         reply = close_app(p)
         return {"type": "noop", "reply": reply}
 
-    # Запуск приложений
     if any(w in p for w in ["открой", "запусти", "вруби", "включи"]):
         if any(x in p for x in ["телеграм", "телеге", "телегу", "тг"]):
             return {"type": "open_tg", "reply": "Запускаю Телеграм."}
@@ -198,28 +195,22 @@ def parse_system_intent(text):
         if any(x in p for x in ["терминал", "консоль"]):
             return {"type": "open_app_cmd", "cmd": "gnome-terminal", "reply": "Терминал готов к работе."}
 
-    # Очистка ОЗУ
     if has("intent_purge"):
         subprocess.run(["sync"])
         return {"type": "noop", "reply": "Сбросила системный дисковый кэш, память свободна."}
 
-    # Режим сна
     if has("intent_sleep"):
         return {"type": "sleep_mode", "reply": "Спокойной ночи, Сенеч. Перевожу дек в режим ожидания."}
 
-    # Скриншот
     if has("intent_screenshot"):
         return {"type": "screenshot", "reply": "Скриншот сохранён в папку изображений."}
 
-    # Статистика
     if has("intent_stats"):
         return {"type": "stats", "reply": get_system_stats()}
 
-    # Погода
     if has("intent_weather"):
         return {"type": "weather", "reply": get_real_weather()}
 
-    # Будильник
     if has("intent_alarm"):
         diff, t_str = parse_alarm_target(p)
         if diff:
@@ -229,19 +220,16 @@ def parse_system_intent(text):
             txt_desc = f"{sec // 60} мин" if sec >= 60 and sec % 60 == 0 else f"{sec} сек"
             return {"type": "alarm", "seconds": sec, "target_str": txt_desc, "reply": f"Будильник через {txt_desc} взведён."}
 
-    # Таймер
     if has("intent_timer"):
         sec = parse_timer_seconds(p)
         txt_desc = f"{sec // 60} мин" if sec >= 60 and sec % 60 == 0 else f"{sec} сек"
         return {"type": "timer", "seconds": sec, "reply": f"Таймер на {txt_desc} пошел."}
 
-    # Мультимедиа
     if has("media_next"): return {"type": "media_next", "reply": "Следующий трек."}
     if has("media_prev"): return {"type": "media_prev", "reply": "Предыдущий трек."}
     if has("media_pause"): return {"type": "media_pause", "reply": "Музыка на паузе."}
     if has("media_play"): return {"type": "media_play", "reply": "Продолжаю играть."}
 
-    # Громкость
     if "максимум" in p or "на всю" in p:
         return {"type": "set_vol", "val": 100, "reply": "Громкость на максимум."}
     if "без звука" in p or "мут" in p:
@@ -254,7 +242,6 @@ def parse_system_intent(text):
             v = int(m.group(1))
             return {"type": "set_vol", "val": v, "reply": f"Громкость {v} процентов."}
 
-    # Питание
     if any(w in p for w in SYNONYMS["action_off"]) and any(w in p for w in SYNONYMS["target_screen"]):
         return {"type": "screen_off", "reply": "Гашу монитор."}
     if has("action_lock"):
@@ -335,8 +322,9 @@ class BrainThread(QThread):
                             messages.append({"role": "assistant", "content": a})
                         messages.append({"role": "user", "content": query})
 
-                        payload = {"messages": messages}
-                        resp = requests.post(url, headers=headers, json=payload, timeout=8)
+                        # Увеличиваем лимит токенов, чтобы не обрезало фразы
+                        payload = {"messages": messages, "max_tokens": 300}
+                        resp = requests.post(url, headers=headers, json=payload, timeout=10)
                         if resp.status_code == 200:
                             raw = resp.json().get("result", {}).get("response", "")
                             ans = clean_text(raw) or "Я здесь, слушаю тебя."
@@ -364,15 +352,99 @@ class BrainThread(QThread):
         self.ready.emit(ans, AUDIO_PATH, dur, action_payload)
 
 # -------------------------------------------------------------
-# ГЛАВНАЯ КНОПКА НА РАБОЧЕМ СТОЛЕ (БЕЗ ПАНЕЛИ ЗАДАЧ И БЕЗ СВОРАЧИВАНИЯ)
+# ЦЕНТРАЛЬНЫЙ ОВЕРЛЕЙ С ДЕВОЧКОЙ (ВОЗВРАЩЕН НА РАБОЧИЙ СТОЛ)
 # -------------------------------------------------------------
-class FloatingDeckTrigger(QWidget):
+class CenterDeckAvatar(QWidget):
     def __init__(self):
         super().__init__()
-        self.hud_popup = None
-        self.brain = None
+        self.setWindowFlags(Qt.Tool | Qt.FramelessWindowHint | Qt.WindowStaysOnBottomHint)
+        self.setAttribute(Qt.WA_TranslucentBackground, True)
+        self.setAttribute(Qt.WA_ShowWithoutActivating, True)
 
-        # Убираем окно из панели задач, привязываем намертво к рабочему столу
+        self.setFixedWidth(840)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(8)
+        layout.setAlignment(Qt.AlignCenter)
+
+        self.lbl_user = QLabel("")
+        self.lbl_user.setAlignment(Qt.AlignCenter)
+        self.lbl_user.setWordWrap(True)
+        self.lbl_user.setStyleSheet("color: #d8b4fe; font-size: 15px; font-style: italic;")
+        self.lbl_user.hide()
+        layout.addWidget(self.lbl_user)
+
+        self.av_lbl = QLabel()
+        self.av_lbl.setAlignment(Qt.AlignCenter)
+        img_path = find_anime_image()
+        if img_path and os.path.exists(img_path):
+            src_pix = QPixmap(img_path)
+            size = 140
+            scaled = src_pix.scaled(size, size, Qt.KeepAspectRatioByExpanding, Qt.SmoothTransformation)
+            rounded = QPixmap(size, size)
+            rounded.fill(Qt.transparent)
+            painter = QPainter(rounded)
+            painter.setRenderHint(QPainter.Antialiasing, True)
+            path = QPainterPath()
+            path.addEllipse(4, 4, size-8, size-8)
+            painter.setClipPath(path)
+            painter.drawPixmap(0, 0, scaled)
+            painter.end()
+            self.av_lbl.setPixmap(rounded)
+        layout.addWidget(self.av_lbl, alignment=Qt.AlignCenter)
+
+        self.timer_badge = QLabel("")
+        self.timer_badge.setAlignment(Qt.AlignCenter)
+        self.timer_badge.setStyleSheet("""
+            color: #00ffff; font-family: monospace; font-size: 18px; font-weight: bold;
+            background: rgba(0, 255, 255, 0.08); border: 1px solid rgba(0, 255, 255, 0.35);
+            border-radius: 6px; padding: 3px 14px;
+        """)
+        self.timer_badge.hide()
+        layout.addWidget(self.timer_badge, alignment=Qt.AlignCenter)
+
+        self.lbl_sub = QLabel("")
+        self.lbl_sub.setAlignment(Qt.AlignCenter)
+        self.lbl_sub.setWordWrap(True)
+        self.lbl_sub.setStyleSheet("color: #fbcfe8; font-size: 16px; font-weight: 700; line-height: 1.4;")
+        self.lbl_sub.hide()
+        layout.addWidget(self.lbl_sub)
+
+        screen = QApplication.primaryScreen().geometry()
+        self.move((screen.width() - self.width()) // 2, (screen.height() // 2) + 20)
+
+    def showEvent(self, ev):
+        super().showEvent(ev)
+        try:
+            win_id = int(self.winId())
+            subprocess.run(["xprop", "-id", str(win_id), "-f", "_NET_WM_STATE", "32a",
+                            "-set", "_NET_WM_STATE", "_NET_WM_STATE_SKIP_TASKBAR,_NET_WM_STATE_SKIP_PAGER,_NET_WM_STATE_BELOW"],
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        except Exception:
+            pass
+
+    def display_speech(self, user_text, reply_text):
+        self.lbl_user.setText(f"« {user_text} »")
+        self.lbl_user.show()
+        self.lbl_sub.setText(reply_text)
+        self.lbl_sub.show()
+        self.adjustSize()
+        QTimer.singleShot(7000, self.clear_speech)
+
+    def clear_speech(self):
+        self.lbl_user.hide()
+        self.lbl_sub.hide()
+        self.adjustSize()
+
+# -------------------------------------------------------------
+# КНОПКА ТРИГГЕР НА РАБОЧЕМ СТОЛЕ
+# -------------------------------------------------------------
+class FloatingDeckTrigger(QWidget):
+    def __init__(self, center_avatar):
+        super().__init__()
+        self.center_avatar = center_avatar
+        self.hud_popup = None
+
         self.setWindowFlags(Qt.Tool | Qt.FramelessWindowHint | Qt.WindowStaysOnBottomHint)
         self.setAttribute(Qt.WA_TranslucentBackground, True)
         self.setAttribute(Qt.WA_ShowWithoutActivating, True)
@@ -397,12 +469,10 @@ class FloatingDeckTrigger(QWidget):
         layout.addWidget(self.btn_toggle)
 
         screen = QApplication.primaryScreen().geometry()
-        # Фиксируем в правом нижнем углу
         self.move(screen.width() - 170, screen.height() - 85)
 
     def showEvent(self, ev):
         super().showEvent(ev)
-        # Убираем окно из всех списков окон оконного менеджера (Show Desktop не тронет)
         try:
             win_id = int(self.winId())
             subprocess.run(["xprop", "-id", str(win_id), "-f", "_NET_WM_STATE", "32a",
@@ -416,23 +486,23 @@ class FloatingDeckTrigger(QWidget):
             self.hud_popup.close()
             self.hud_popup = None
         else:
-            self.hud_popup = FloatingAiChatDialog(self)
+            self.hud_popup = FloatingAiChatDialog(self, self.center_avatar)
             self.hud_popup.show()
 
 # -------------------------------------------------------------
-# ДИАЛОГОВОЕ ОКНО ЧАТА С ИСТОРИЕЙ (НЕ ПРОПАДАЕТ САМО)
+# ДИАЛОГОВЫЙ ЧАТ С ИСТОРИЕЙ
 # -------------------------------------------------------------
 class FloatingAiChatDialog(QWidget):
-    def __init__(self, parent_trigger):
+    def __init__(self, parent_trigger, center_avatar):
         super().__init__()
         self.parent_trigger = parent_trigger
+        self.center_avatar = center_avatar
         self.alarm_proc = None
         self.countdown_timer = QTimer(self)
         self.countdown_timer.timeout.connect(self.countdown_tick)
         self.remaining_sec = 0
         self.badge_title = "ТАЙМЕР"
 
-        # Не светим в панели задач
         self.setWindowFlags(Qt.Tool | Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint)
         self.setAttribute(Qt.WA_TranslucentBackground, True)
 
@@ -441,7 +511,6 @@ class FloatingAiChatDialog(QWidget):
         main_layout.setContentsMargins(14, 14, 14, 14)
         main_layout.setSpacing(10)
 
-        # Контейнер стиля
         self.card = QFrame(self)
         self.card.setStyleSheet("""
             QFrame {
@@ -454,26 +523,7 @@ class FloatingAiChatDialog(QWidget):
         card_layout.setContentsMargins(14, 12, 14, 12)
         card_layout.setSpacing(8)
 
-        # Хедер с аватаркой, именем и кнопкой закрытия
         header = QHBoxLayout()
-        self.av_lbl = QLabel()
-        img_path = find_anime_image()
-        if img_path and os.path.exists(img_path):
-            src_pix = QPixmap(img_path)
-            size = 36
-            scaled = src_pix.scaled(size, size, Qt.KeepAspectRatioByExpanding, Qt.SmoothTransformation)
-            rounded = QPixmap(size, size)
-            rounded.fill(Qt.transparent)
-            painter = QPainter(rounded)
-            painter.setRenderHint(QPainter.Antialiasing, True)
-            path = QPainterPath()
-            path.addEllipse(0, 0, size, size)
-            painter.setClipPath(path)
-            painter.drawPixmap(0, 0, scaled)
-            painter.end()
-            self.av_lbl.setPixmap(rounded)
-        header.addWidget(self.av_lbl)
-
         title_lbl = QLabel("АКЕМИ // ДЕК АССИСТЕНТ")
         title_lbl.setStyleSheet("color: #ff77a9; font-size: 13px; font-weight: bold; border: none;")
         header.addWidget(title_lbl)
@@ -489,7 +539,6 @@ class FloatingAiChatDialog(QWidget):
         header.addWidget(btn_close)
         card_layout.addLayout(header)
 
-        # Таймер бейдж (если взведен)
         self.timer_badge = QLabel("")
         self.timer_badge.setAlignment(Qt.AlignCenter)
         self.timer_badge.setStyleSheet("""
@@ -523,7 +572,6 @@ class FloatingAiChatDialog(QWidget):
         self.btn_stop_alarm.hide()
         card_layout.addWidget(self.btn_stop_alarm)
 
-        # Область сообщений со скроллом
         self.scroll_area = QScrollArea()
         self.scroll_area.setWidgetResizable(True)
         self.scroll_area.setStyleSheet("""
@@ -545,7 +593,6 @@ class FloatingAiChatDialog(QWidget):
         self.scroll_area.setWidget(self.chat_container)
         card_layout.addWidget(self.scroll_area)
 
-        # Поле ввода
         input_box = QHBoxLayout()
         self.input_field = QLineEdit()
         self.input_field.setPlaceholderText("Команда или вопрос...")
@@ -577,11 +624,9 @@ class FloatingAiChatDialog(QWidget):
 
         main_layout.addWidget(self.card)
 
-        # Размещение над кнопкой в правом углу
         screen = QApplication.primaryScreen().geometry()
         self.move(screen.width() - self.width() - 25, screen.height() - self.height() - 90)
 
-        # Загрузка истории в чат
         self.populate_history()
         self.input_field.setFocus()
 
@@ -633,11 +678,12 @@ class FloatingAiChatDialog(QWidget):
         self.append_message(txt, is_user=True)
 
         self.brain = BrainThread(txt)
-        self.brain.ready.connect(self.on_brain_reply)
+        self.brain.ready.connect(lambda reply, audio, dur, act: self.on_brain_reply(txt, reply, audio, dur, act))
         self.brain.start()
 
-    def on_brain_reply(self, reply, audio, dur, act):
+    def on_brain_reply(self, user_txt, reply, audio, dur, act):
         self.append_message(reply, is_user=False)
+        self.center_avatar.display_speech(user_txt, reply)
 
         if os.path.exists(audio):
             subprocess.Popen(["mpv", "--no-video", "--really-quiet", audio])
@@ -721,6 +767,8 @@ class FloatingAiChatDialog(QWidget):
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
-    w = FloatingDeckTrigger()
+    center_av = CenterDeckAvatar()
+    center_av.show()
+    w = FloatingDeckTrigger(center_av)
     w.show()
     sys.exit(app.exec_())
