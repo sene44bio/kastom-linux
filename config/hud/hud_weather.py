@@ -97,37 +97,49 @@ class WeatherWorker(QThread):
     data_loaded = pyqtSignal(dict)
 
     def run(self):
-        url = "https://api.open-meteo.com/v1/forecast?latitude=56.8433&longitude=60.6044&current=temperature_2m,weather_code&hourly=temperature_2m,weather_code&timezone=Asia%2FYekaterinburg"
         data = None
-
         try:
-            res = subprocess.run(["curl", "-4", "-s", "--max-time", "4", url], capture_output=True, text=True)
-            if res.returncode == 0 and res.stdout and "current" in res.stdout:
-                data = json.loads(res.stdout)
+            res = subprocess.run(["curl", "-s", "--max-time", "5", "https://wttr.in/Yekaterinburg?format=j1"], capture_output=True, text=True)
+            if res.returncode == 0 and res.stdout:
+                raw = json.loads(res.stdout)
+                curr = raw["current_condition"][0]
+                t_c = int(curr["temp_C"])
+                
+                desc = curr.get("weatherDesc", [{}])[0].get("value", "").lower()
+                w_code = 0
+                if "snow" in desc: w_code = 71
+                elif "rain" in desc or "drizzle" in desc: w_code = 61
+                elif "overcast" in desc: w_code = 3
+                elif "cloud" in desc: w_code = 2
+
+                now = datetime.now()
+                times = [f"{now.strftime('%Y-%m-%d')}T{(now.hour + i)%24:02d}:00" for i in range(1, 6)]
+                hourly_temps = []
+                hourly_codes = []
+                try:
+                    for i in range(1, 6):
+                        fut_hour = (now.hour + i) % 24
+                        b_idx = min(fut_hour // 3, 7)
+                        w_h = raw["weather"][0]["hourly"][b_idx]
+                        hourly_temps.append(int(w_h["tempC"]))
+                        hourly_codes.append(w_code)
+                except Exception:
+                    hourly_temps = [t_c] * 5
+                    hourly_codes = [w_code] * 5
+
+                data = {
+                    "current": {"temperature_2m": t_c, "weather_code": w_code},
+                    "hourly": {"time": times, "temperature_2m": hourly_temps, "weather_code": hourly_codes}
+                }
         except Exception:
             pass
 
         if not data:
-            try:
-                w_res = subprocess.run(["curl", "-4", "-s", "--max-time", "4", "https://wttr.in/Yekaterinburg?format=j1"], capture_output=True, text=True)
-                if w_res.returncode == 0 and w_res.stdout:
-                    raw = json.loads(w_res.stdout)
-                    t_c = int(raw["current_condition"][0]["temp_C"])
-                    now_h = int(datetime.now().strftime("%H"))
-                    times = [f"2026-10-05T{(now_h + i)%24:02d}:00" for i in range(1, 6)]
-                    data = {
-                        "current": {"temperature_2m": t_c, "weather_code": 2},
-                        "hourly": {"time": times, "temperature_2m": [t_c]*5, "weather_code": [2]*5}
-                    }
-            except Exception:
-                pass
-
-        if not data:
-            now_h = int(datetime.now().strftime("%H"))
-            times = [f"2026-10-05T{(now_h + i)%24:02d}:00" for i in range(1, 6)]
+            now = datetime.now()
+            times = [f"{now.strftime('%Y-%m-%d')}T{(now.hour + i)%24:02d}:00" for i in range(1, 6)]
             data = {
-                "current": {"temperature_2m": 4, "weather_code": 2},
-                "hourly": {"time": times, "temperature_2m": [4, 4, 3, 3, 2], "weather_code": [2, 2, 3, 3, 3]}
+                "current": {"temperature_2m": -4, "weather_code": 2},
+                "hourly": {"time": times, "temperature_2m": [-4]*5, "weather_code": [2]*5}
             }
 
         self.data_loaded.emit(data)
