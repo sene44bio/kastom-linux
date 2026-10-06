@@ -4,7 +4,7 @@ from PyQt5.QtWidgets import (
     QApplication, QWidget, QLabel, QVBoxLayout, QHBoxLayout, 
     QLineEdit, QPushButton, QProgressBar, QScrollArea, QFrame
 )
-from PyQt5.QtCore import Qt, QTimer, QPropertyAnimation, QParallelAnimationGroup, pyqtSignal, QThread, QPoint
+from PyQt5.QtCore import Qt, QTimer, pyqtSignal, QThread, QPoint
 from PyQt5.QtGui import QPixmap, QPainter, QPainterPath
 
 CF_CONFIG_FILE = os.path.expanduser("~/.config/hud/cf_config.json")
@@ -15,7 +15,7 @@ ALARM_SOUND = os.path.expanduser("~/.config/hud/alarm_sound.wav")
 SYSTEM_PROMPT = """Ты — Акеми, харизматичная, ироничная и преданная цифровая напарница парня по имени Сенеч.
 Ты встроена в его кастомный киберпанк-дек на базе Linux.
 1. Твой собеседник — Сенеч. Общайся свободно, остроумно, по-дружески, без приторной ванильности.
-2. Отвечай развернуто, емко, интересно и доводи мысль до конца.
+2. Отвечай развернуто, емко, интересно и обязательно доводи каждую фразу до логической точки.
 3. КАТЕГОРИЧЕСКИ ЗАПРЕЩЕНО писать любые эмодзи, смайлики (включая скобки ), кавычки и звездочки. Только чистый русский текст."""
 
 SYNONYMS = {
@@ -77,7 +77,7 @@ def get_system_stats():
 def launch_telegram():
     subprocess.Popen([
         "sh", "-c",
-        "which telegram-desktop >/dev/null && telegram-desktop || (flatpak run org.telegram.desktop 2>/dev/null || /opt/Telegram/Telegram 2>/dev/null || tsetup* 2>/dev/null)"
+        "which telegram-desktop >/dev/null && telegram-desktop || (flatpak run org.telegram.desktop 2>/dev/null || /opt/Telegram/Telegram 2>/dev/null)"
     ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 def launch_browser(url=None):
@@ -322,9 +322,9 @@ class BrainThread(QThread):
                             messages.append({"role": "assistant", "content": a})
                         messages.append({"role": "user", "content": query})
 
-                        # Увеличиваем лимит токенов, чтобы не обрезало фразы
-                        payload = {"messages": messages, "max_tokens": 300}
-                        resp = requests.post(url, headers=headers, json=payload, timeout=10)
+                        # Полноценный лимит токенов, чтобы не обрезало фразы на полуслове
+                        payload = {"messages": messages, "max_tokens": 1024}
+                        resp = requests.post(url, headers=headers, json=payload, timeout=12)
                         if resp.status_code == 200:
                             raw = resp.json().get("result", {}).get("response", "")
                             ans = clean_text(raw) or "Я здесь, слушаю тебя."
@@ -352,16 +352,18 @@ class BrainThread(QThread):
         self.ready.emit(ans, AUDIO_PATH, dur, action_payload)
 
 # -------------------------------------------------------------
-# ЦЕНТРАЛЬНЫЙ ОВЕРЛЕЙ С ДЕВОЧКОЙ (ВОЗВРАЩЕН НА РАБОЧИЙ СТОЛ)
+# ЦЕНТРАЛЬНЫЙ АВАТАР: СТРОГО НА УРОВНЕ РАБОЧЕГО СТОЛА
+# (НЕ ПЕРЕКРЫВАЕТ ОКНА, SUPER+D НЕ СВОРАЧИВАЕТ)
 # -------------------------------------------------------------
 class CenterDeckAvatar(QWidget):
     def __init__(self):
         super().__init__()
-        self.setWindowFlags(Qt.Tool | Qt.FramelessWindowHint | Qt.WindowStaysOnBottomHint)
+        # Привязка намертво к рабочему столу
+        self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnBottomHint | Qt.SubWindow)
         self.setAttribute(Qt.WA_TranslucentBackground, True)
         self.setAttribute(Qt.WA_ShowWithoutActivating, True)
 
-        self.setFixedWidth(840)
+        self.setFixedWidth(860)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(8)
@@ -370,7 +372,7 @@ class CenterDeckAvatar(QWidget):
         self.lbl_user = QLabel("")
         self.lbl_user.setAlignment(Qt.AlignCenter)
         self.lbl_user.setWordWrap(True)
-        self.lbl_user.setStyleSheet("color: #d8b4fe; font-size: 15px; font-style: italic;")
+        self.lbl_user.setStyleSheet("color: #d8b4fe; font-size: 15px; font-style: italic; background: transparent;")
         self.lbl_user.hide()
         layout.addWidget(self.lbl_user)
 
@@ -406,35 +408,57 @@ class CenterDeckAvatar(QWidget):
         self.lbl_sub = QLabel("")
         self.lbl_sub.setAlignment(Qt.AlignCenter)
         self.lbl_sub.setWordWrap(True)
-        self.lbl_sub.setStyleSheet("color: #fbcfe8; font-size: 16px; font-weight: 700; line-height: 1.4;")
+        self.lbl_sub.setStyleSheet("color: #fbcfe8; font-size: 16px; font-weight: 700; line-height: 1.4; background: transparent;")
         self.lbl_sub.hide()
         layout.addWidget(self.lbl_sub)
 
         screen = QApplication.primaryScreen().geometry()
         self.move((screen.width() - self.width()) // 2, (screen.height() // 2) + 20)
 
+        # Таймер посимвольной печати
+        self.type_timer = QTimer(self)
+        self.type_timer.timeout.connect(self.typewriter_step)
+        self.full_text = ""
+        self.char_idx = 0
+
     def showEvent(self, ev):
         super().showEvent(ev)
+        self.lower()
         try:
             win_id = int(self.winId())
+            subprocess.run(["xprop", "-id", str(win_id), "-f", "_NET_WM_WINDOW_TYPE", "32a",
+                            "-set", "_NET_WM_WINDOW_TYPE", "_NET_WM_WINDOW_TYPE_DESKTOP"],
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             subprocess.run(["xprop", "-id", str(win_id), "-f", "_NET_WM_STATE", "32a",
                             "-set", "_NET_WM_STATE", "_NET_WM_STATE_SKIP_TASKBAR,_NET_WM_STATE_SKIP_PAGER,_NET_WM_STATE_BELOW"],
                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         except Exception:
             pass
 
-    def display_speech(self, user_text, reply_text):
+    def start_speech(self, user_text, reply_text, duration):
         self.lbl_user.setText(f"« {user_text} »")
         self.lbl_user.show()
-        self.lbl_sub.setText(reply_text)
-        self.lbl_sub.show()
-        self.adjustSize()
-        QTimer.singleShot(7000, self.clear_speech)
 
-    def clear_speech(self):
-        self.lbl_user.hide()
-        self.lbl_sub.hide()
+        self.full_text = reply_text
+        self.char_idx = 0
+        self.lbl_sub.setText("")
+        self.lbl_sub.show()
+
+        total_chars = max(1, len(self.full_text))
+        interval = int(max(15, ((duration - 0.2) * 1000) / total_chars))
+
+        self.type_timer.stop()
+        self.type_timer.start(interval)
         self.adjustSize()
+
+    def typewriter_step(self):
+        if self.char_idx < len(self.full_text):
+            self.char_idx += 1
+            self.lbl_sub.setText(self.full_text[:self.char_idx] + "▌")
+        else:
+            self.type_timer.stop()
+            self.lbl_sub.setText(self.full_text)
+            self.adjustSize()
 
 # -------------------------------------------------------------
 # КНОПКА ТРИГГЕР НА РАБОЧЕМ СТОЛЕ
@@ -445,7 +469,7 @@ class FloatingDeckTrigger(QWidget):
         self.center_avatar = center_avatar
         self.hud_popup = None
 
-        self.setWindowFlags(Qt.Tool | Qt.FramelessWindowHint | Qt.WindowStaysOnBottomHint)
+        self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnBottomHint | Qt.SubWindow)
         self.setAttribute(Qt.WA_TranslucentBackground, True)
         self.setAttribute(Qt.WA_ShowWithoutActivating, True)
 
@@ -473,8 +497,12 @@ class FloatingDeckTrigger(QWidget):
 
     def showEvent(self, ev):
         super().showEvent(ev)
+        self.lower()
         try:
             win_id = int(self.winId())
+            subprocess.run(["xprop", "-id", str(win_id), "-f", "_NET_WM_WINDOW_TYPE", "32a",
+                            "-set", "_NET_WM_WINDOW_TYPE", "_NET_WM_WINDOW_TYPE_DESKTOP"],
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             subprocess.run(["xprop", "-id", str(win_id), "-f", "_NET_WM_STATE", "32a",
                             "-set", "_NET_WM_STATE", "_NET_WM_STATE_SKIP_TASKBAR,_NET_WM_STATE_SKIP_PAGER,_NET_WM_STATE_BELOW"],
                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -683,7 +711,8 @@ class FloatingAiChatDialog(QWidget):
 
     def on_brain_reply(self, user_txt, reply, audio, dur, act):
         self.append_message(reply, is_user=False)
-        self.center_avatar.display_speech(user_txt, reply)
+        # Запускаем синхронную печать под голос на центральном аватаре
+        self.center_avatar.start_speech(user_txt, reply, dur)
 
         if os.path.exists(audio):
             subprocess.Popen(["mpv", "--no-video", "--really-quiet", audio])
