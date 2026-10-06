@@ -12,11 +12,12 @@ HISTORY_FILE = os.path.expanduser("~/.config/hud/chat_history.json")
 AUDIO_PATH = "/tmp/ai_chat_reply.mp3"
 ALARM_SOUND = os.path.expanduser("~/.config/hud/alarm_sound.wav")
 
-SYSTEM_PROMPT = """Ты — Акеми, харизматичная, ироничная и преданная цифровая напарница парня по имени Сенеч.
-Ты встроена в его кастомный киберпанк-дек на базе Linux.
-1. Твой собеседник — Сенеч. Общайся свободно, остроумно, по-дружески, без приторной ванильности.
-2. Отвечай развернуто, емко, интересно и обязательно доводи каждую фразу до логической точки.
-3. КАТЕГОРИЧЕСКИ ЗАПРЕЩЕНО писать любые эмодзи, смайлики (включая скобки ), кавычки и звездочки. Только чистый русский текст."""
+SYSTEM_PROMPT = """Ты — Акеми, харизматичная, ироничная и адекватная цифровая напарница парня по имени Сенеч.
+Ты работаешь на его ПК с Linux Mint.
+1. Твой собеседник — Сенеч. Говори свободно, с юмором, по-дружески, без приторной слащавости.
+2. СТРОГИЙ ЗАПРЕТ НА ГАЛЛЮЦИНАЦИИ: Никогда не придумывай вымышленные вирусы, фальшивые системные сбои, угрозы взлома и фантастическую чушь. Опирайся только на реальные факты и то, о чем тебя прямо спрашивают.
+3. Отвечай связно, грамотно и доводи предложения до логической точки.
+4. КАТЕГОРИЧЕСКИ ЗАПРЕЩЕНО использовать любые эмодзи, смайлики (включая скобки ), кавычки и звездочки. Только чистый текст на русском языке."""
 
 SYNONYMS = {
     "action_off": ["выключи", "выруби", "офни", "погаси", "потуши", "загаси", "вырубай", "отключи", "выключить"],
@@ -61,18 +62,18 @@ def get_real_weather():
             d = r.json()
             temp = d["current_condition"][0]["temp_C"]
             desc = d["current_condition"][0]["lang_ru"][0]["value"].lower()
-            return f"В Екатеринбурге сейчас {temp} градусов, {desc}. На улице свежо, Сенеч."
+            return f"В Екатеринбурге сейчас {temp} градусов, {desc}."
     except Exception:
         pass
-    return "В Екатеринбурге прохладно и морозно, держись в тепле, Сенеч."
+    return "В Екатеринбурге прохладно, держись в тепле, Сенеч."
 
 def get_system_stats():
     try:
         cpu = subprocess.check_output("top -bn1 | grep 'Cpu(s)' | awk '{print $2}'", shell=True).decode().strip()
         ram = subprocess.check_output("free -m | awk '/Mem:/ {printf(\"%.1f/%.1f ГБ\", $3/1024, $2/1024)}'", shell=True).decode().strip()
-        return f"Процессор нагружен на {cpu} процентов, память занята на {ram}. Дека работает стабильно."
+        return f"Процессор нагружен на {cpu} процентов, оперативная память занята на {ram}."
     except Exception:
-        return "Все датчики в зеленой зоне, система в порядке."
+        return "Система работает стабильно."
 
 def launch_telegram():
     subprocess.Popen([
@@ -107,8 +108,8 @@ def close_app(target):
         return "Остановила музыку."
     if any(x in t for x in ["терминал", "консоль"]):
         subprocess.run(["pkill", "-f", "gnome-terminal"], stderr=subprocess.DEVNULL)
-        return "Прикрыла лишние терминалы."
-    return "Приложение не найдено в процессах."
+        return "Прикрыла терминалы."
+    return "Процесс не найден."
 
 def parse_alarm_target(text):
     t = text.lower()
@@ -175,17 +176,16 @@ def parse_system_intent(text):
     search_m = re.search(r'(?:найди|гугли|поищи)\s+(.+)', p)
     if search_m:
         q = search_m.group(1).strip()
-        return {"type": "search_web", "query": q, "reply": f"Ищу информацию по запросу {q}."}
+        return {"type": "search_web", "query": q, "reply": f"Ищу по запросу {q}."}
 
     if any(w in p for w in ["закрой", "прикрой", "выруби приложение", "убей"]):
-        reply = close_app(p)
-        return {"type": "noop", "reply": reply}
+        return {"type": "noop", "reply": close_app(p)}
 
     if any(w in p for w in ["открой", "запусти", "вруби", "включи"]):
         if any(x in p for x in ["телеграм", "телеге", "телегу", "тг"]):
             return {"type": "open_tg", "reply": "Запускаю Телеграм."}
         if any(x in p for x in ["ютуб", "youtube"]):
-            return {"type": "open_yt", "reply": "Открываю Ютуб в браузере."}
+            return {"type": "open_yt", "reply": "Открываю Ютуб."}
         if any(x in p for x in ["музыку", "яндекс музыку", "треки"]):
             return {"type": "open_music", "reply": "Включаю Яндекс Музыку."}
         if any(x in p for x in ["браузер", "яндекс", "интернет"]):
@@ -197,13 +197,13 @@ def parse_system_intent(text):
 
     if has("intent_purge"):
         subprocess.run(["sync"])
-        return {"type": "noop", "reply": "Сбросила системный дисковый кэш, память свободна."}
+        return {"type": "noop", "reply": "Кэш сброшен, память освобождена."}
 
     if has("intent_sleep"):
-        return {"type": "sleep_mode", "reply": "Спокойной ночи, Сенеч. Перевожу дек в режим ожидания."}
+        return {"type": "sleep_mode", "reply": "Спокойной ночи, Сенеч."}
 
     if has("intent_screenshot"):
-        return {"type": "screenshot", "reply": "Скриншот сохранён в папку изображений."}
+        return {"type": "screenshot", "reply": "Скриншот сохранён."}
 
     if has("intent_stats"):
         return {"type": "stats", "reply": get_system_stats()}
@@ -227,13 +227,13 @@ def parse_system_intent(text):
 
     if has("media_next"): return {"type": "media_next", "reply": "Следующий трек."}
     if has("media_prev"): return {"type": "media_prev", "reply": "Предыдущий трек."}
-    if has("media_pause"): return {"type": "media_pause", "reply": "Музыка на паузе."}
-    if has("media_play"): return {"type": "media_play", "reply": "Продолжаю играть."}
+    if has("media_pause"): return {"type": "media_pause", "reply": "Пауза."}
+    if has("media_play"): return {"type": "media_play", "reply": "Играем дальше."}
 
     if "максимум" in p or "на всю" in p:
         return {"type": "set_vol", "val": 100, "reply": "Громкость на максимум."}
     if "без звука" in p or "мут" in p:
-        return {"type": "set_vol", "val": 0, "reply": "Звук заглушен."}
+        return {"type": "set_vol", "val": 0, "reply": "Звук отключен."}
     if has("vol_up"): return {"type": "vol_up", "reply": "Громкость плюс пять процентов."}
     if has("vol_down"): return {"type": "vol_down", "reply": "Громкость минус пять процентов."}
     if "громкость" in p or "звук" in p:
@@ -248,7 +248,7 @@ def parse_system_intent(text):
         return {"type": "lock", "reply": "Блокирую дек."}
     if any(w in p for w in SYNONYMS["action_off"]) and any(w in p for w in ["пк", "комп", "пекарню", "систему", "тачку"]):
         sec = parse_timer_seconds(p) if any(x in p for x in ["через", "на"]) else 5
-        return {"type": "shutdown", "seconds": sec, "reply": f"Выключаю станцию через {sec} секунд."}
+        return {"type": "shutdown", "seconds": sec, "reply": f"Выключаю ПК через {sec} секунд."}
     if has("action_reboot"):
         return {"type": "reboot", "seconds": 5, "reply": "Перезагружаю систему."}
 
@@ -326,15 +326,15 @@ class BrainThread(QThread):
                         resp = requests.post(url, headers=headers, json=payload, timeout=12)
                         if resp.status_code == 200:
                             raw = resp.json().get("result", {}).get("response", "")
-                            ans = clean_text(raw) or "Я здесь, слушаю тебя."
+                            ans = clean_text(raw) or "Слушаю тебя."
                             CHAT_HISTORY.append((query, ans))
                             save_history(CHAT_HISTORY)
                         else:
-                            ans = "Облако слегка задумалось, повтори ещё раз."
+                            ans = "Облачный сервис задумался, повтори вопрос."
                     except Exception:
-                        ans = "Связь с облачной сетью прервалась, но локальные системы в норме."
+                        ans = "Связь с сервером прервалась."
                 else:
-                    ans = "Конфигурация нейросети отсутствует."
+                    ans = "Конфиг нейросети не найден."
 
         voice_text = ans.replace("Сенеч", "Се\u0301неч").replace("сенеч", "се\u0301неч")
         try:
@@ -351,14 +351,16 @@ class BrainThread(QThread):
         self.ready.emit(ans, AUDIO_PATH, dur, action_payload)
 
 # -------------------------------------------------------------
-# ЦЕНТРАЛЬНЫЙ АВАТАР: БЕЗУПРЕЧНАЯ ПРИВЯЗКА К СТОЛУ + SPINNER + БЫСТРЫЙ TYPEWRITER
+# ЦЕНТРАЛЬНЫЙ АВАТАР: СКРЫТ ПО УМОЛЧАНИЮ, НЕ ПЕРЕХВАТЫВАЕТ КЛИКИ
 # -------------------------------------------------------------
 class CenterDeckAvatar(QWidget):
     def __init__(self):
         super().__init__()
-        self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnBottomHint | Qt.SubWindow)
+        # Frameless, без реакции на клики (прозрачен для мыши), поверх обоев
+        self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnBottomHint | Qt.Tool)
         self.setAttribute(Qt.WA_TranslucentBackground, True)
         self.setAttribute(Qt.WA_ShowWithoutActivating, True)
+        self.setAttribute(Qt.WA_TransparentForMouseEvents, True)
 
         self.setFixedWidth(860)
         layout = QVBoxLayout(self)
@@ -392,12 +394,11 @@ class CenterDeckAvatar(QWidget):
             self.av_lbl.setPixmap(rounded)
         layout.addWidget(self.av_lbl, alignment=Qt.AlignCenter)
 
-        # Неоновый спиннер ожидания
         self.spinner_frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
         self.spinner_idx = 0
         self.spinner_lbl = QLabel("")
         self.spinner_lbl.setAlignment(Qt.AlignCenter)
-        self.spinner_lbl.setStyleSheet("color: #00ffff; font-family: monospace; font-size: 20px; font-weight: bold; background: transparent;")
+        self.spinner_lbl.setStyleSheet("color: #00ffff; font-family: monospace; font-size: 22px; font-weight: bold; background: transparent;")
         self.spinner_lbl.hide()
         layout.addWidget(self.spinner_lbl, alignment=Qt.AlignCenter)
 
@@ -429,22 +430,11 @@ class CenterDeckAvatar(QWidget):
         self.spin_timer = QTimer(self)
         self.spin_timer.timeout.connect(self.spin_tick)
 
-        # Защита от сворачивания Super+D: мягкий таймер на установку типа окна
-        QTimer.singleShot(500, self.enforce_desktop_layer)
-
-    def enforce_desktop_layer(self):
-        try:
-            win_id = int(self.winId())
-            subprocess.run(["xprop", "-id", str(win_id), "-f", "_NET_WM_WINDOW_TYPE", "32a",
-                            "-set", "_NET_WM_WINDOW_TYPE", "_NET_WM_WINDOW_TYPE_DESKTOP"],
-                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            subprocess.run(["xprop", "-id", str(win_id), "-f", "_NET_WM_STATE", "32a",
-                            "-set", "_NET_WM_STATE", "_NET_WM_STATE_SKIP_TASKBAR,_NET_WM_STATE_SKIP_PAGER,_NET_WM_STATE_BELOW"],
-                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        except Exception:
-            pass
+        # По умолчанию аватар скрыт!
+        self.hide()
 
     def start_thinking(self, prompt_text):
+        self.show()
         self.type_timer.stop()
         self.lbl_user.setText(f"« {prompt_text} »")
         self.lbl_user.show()
@@ -459,6 +449,7 @@ class CenterDeckAvatar(QWidget):
         self.spinner_lbl.setText(self.spinner_frames[self.spinner_idx])
 
     def start_speech(self, user_text, reply_text, duration):
+        self.show()
         self.spin_timer.stop()
         self.spinner_lbl.hide()
 
@@ -470,16 +461,14 @@ class CenterDeckAvatar(QWidget):
         self.lbl_sub.setText("")
         self.lbl_sub.show()
 
-        # Быстрый typewriter: максимум 18 мс на символ, чтобы печать не отставала
         total_chars = max(1, len(self.full_text))
-        interval = max(12, int(((duration * 0.75) * 1000) / total_chars))
+        interval = max(10, int(((duration * 0.75) * 1000) / total_chars))
 
         self.type_timer.stop()
         self.type_timer.start(interval)
         self.adjustSize()
 
     def typewriter_step(self):
-        # Печатаем сразу пачками по 2 символа для приятной динамики
         step_len = 2 if len(self.full_text) > 40 else 1
         if self.char_idx < len(self.full_text):
             self.char_idx = min(len(self.full_text), self.char_idx + step_len)
@@ -489,13 +478,13 @@ class CenterDeckAvatar(QWidget):
             self.lbl_sub.setText(self.full_text)
             self.adjustSize()
 
-    def clear_text_display(self):
+    def clear_and_hide(self):
         self.spin_timer.stop()
         self.type_timer.stop()
         self.spinner_lbl.hide()
         self.lbl_user.hide()
         self.lbl_sub.hide()
-        self.adjustSize()
+        self.hide()
 
 # -------------------------------------------------------------
 # КНОПКА ТРИГГЕР НА РАБОЧЕМ СТОЛЕ
@@ -506,15 +495,16 @@ class FloatingDeckTrigger(QWidget):
         self.center_avatar = center_avatar
         self.hud_popup = None
 
-        self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnBottomHint | Qt.SubWindow)
+        # Окно-тулбар поверх рабочего стола, гарантированно реагирует на клики
+        self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnBottomHint | Qt.Tool)
         self.setAttribute(Qt.WA_TranslucentBackground, True)
-        self.setAttribute(Qt.WA_ShowWithoutActivating, True)
 
         layout = QHBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
 
         self.btn_toggle = QPushButton("♥ ПОДРУГА", self)
         self.btn_toggle.setFixedSize(140, 36)
+        self.btn_toggle.setCursor(Qt.PointingHandCursor)
         self.btn_toggle.setStyleSheet("""
             QPushButton {
                 background: rgba(18, 16, 26, 0.95);
@@ -532,26 +522,13 @@ class FloatingDeckTrigger(QWidget):
         screen = QApplication.primaryScreen().geometry()
         self.move(screen.width() - 170, screen.height() - 85)
 
-        QTimer.singleShot(600, self.enforce_desktop_layer)
-
-    def enforce_desktop_layer(self):
-        try:
-            win_id = int(self.winId())
-            subprocess.run(["xprop", "-id", str(win_id), "-f", "_NET_WM_WINDOW_TYPE", "32a",
-                            "-set", "_NET_WM_WINDOW_TYPE", "_NET_WM_WINDOW_TYPE_DESKTOP"],
-                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            subprocess.run(["xprop", "-id", str(win_id), "-f", "_NET_WM_STATE", "32a",
-                            "-set", "_NET_WM_STATE", "_NET_WM_STATE_SKIP_TASKBAR,_NET_WM_STATE_SKIP_PAGER,_NET_WM_STATE_BELOW"],
-                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        except Exception:
-            pass
-
     def toggle_chat(self):
         if self.hud_popup and self.hud_popup.isVisible():
             self.hud_popup.close()
             self.hud_popup = None
-            self.center_avatar.clear_text_display()
+            self.center_avatar.clear_and_hide()
         else:
+            self.center_avatar.show()
             self.hud_popup = FloatingAiChatDialog(self, self.center_avatar)
             self.hud_popup.show()
 
@@ -597,6 +574,7 @@ class FloatingAiChatDialog(QWidget):
 
         btn_close = QPushButton("✕")
         btn_close.setFixedSize(26, 26)
+        btn_close.setCursor(Qt.PointingHandCursor)
         btn_close.setStyleSheet("""
             QPushButton { background: transparent; color: #888899; font-size: 14px; font-weight: bold; border: none; }
             QPushButton:hover { color: #ff5588; }
@@ -677,6 +655,7 @@ class FloatingAiChatDialog(QWidget):
 
         btn_send = QPushButton("➤")
         btn_send.setFixedSize(36, 32)
+        btn_send.setCursor(Qt.PointingHandCursor)
         btn_send.setStyleSheet("""
             QPushButton {
                 background: #ff77a9; color: #12101a; font-size: 14px; font-weight: bold;
@@ -698,7 +677,7 @@ class FloatingAiChatDialog(QWidget):
 
     def close_and_clear(self):
         self.close()
-        self.center_avatar.clear_text_display()
+        self.center_avatar.clear_and_hide()
 
     def populate_history(self):
         for q, a in CHAT_HISTORY[-6:]:
@@ -745,9 +724,7 @@ class FloatingAiChatDialog(QWidget):
         if not txt: return
         self.input_field.clear()
 
-        # 1. Сразу отображаем в чате
         self.append_message(txt, is_user=True)
-        # 2. Сразу отображаем на центральном аватаре и включаем спиннер ожидания
         self.center_avatar.start_thinking(txt)
 
         self.brain = BrainThread(txt)
@@ -756,7 +733,6 @@ class FloatingAiChatDialog(QWidget):
 
     def on_brain_reply(self, user_txt, reply, audio, dur, act):
         self.append_message(reply, is_user=False)
-        # Запускаем синхронную быструю печать
         self.center_avatar.start_speech(user_txt, reply, dur)
 
         if os.path.exists(audio):
@@ -842,9 +818,6 @@ class FloatingAiChatDialog(QWidget):
 if __name__ == "__main__":
     app = QApplication(sys.argv)
     center_av = CenterDeckAvatar()
-    center_av.show()
-    center_av.lower()
     w = FloatingDeckTrigger(center_av)
     w.show()
-    w.lower()
     sys.exit(app.exec_())
