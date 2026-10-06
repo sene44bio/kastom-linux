@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Exec=/bin/bash -c "sleep 1 && ~/.config/autostart_desktop_hud.sh"
+Hidden=false
+NoDisplay=false
+X-GNOME-Autostart-enabled=true
+Name=Cyber Deck HUD & AI
+Comment=Autostart HUD widgets and AI Greeting
