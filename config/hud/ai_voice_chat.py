@@ -322,7 +322,6 @@ class BrainThread(QThread):
                             messages.append({"role": "assistant", "content": a})
                         messages.append({"role": "user", "content": query})
 
-                        # Полноценный лимит токенов, чтобы не обрезало фразы на полуслове
                         payload = {"messages": messages, "max_tokens": 1024}
                         resp = requests.post(url, headers=headers, json=payload, timeout=12)
                         if resp.status_code == 200:
@@ -352,14 +351,13 @@ class BrainThread(QThread):
         self.ready.emit(ans, AUDIO_PATH, dur, action_payload)
 
 # -------------------------------------------------------------
-# ЦЕНТРАЛЬНЫЙ АВАТАР: СТРОГО НА УРОВНЕ РАБОЧЕГО СТОЛА
-# (НЕ ПЕРЕКРЫВАЕТ ОКНА, SUPER+D НЕ СВОРАЧИВАЕТ)
+# ЦЕНТРАЛЬНЫЙ АВАТАР: ЧИСТЫЙ QT ФЛАГ РАБОЧЕГО СТОЛА (БЕЗ ДЕДЛОКОВ XPROP)
 # -------------------------------------------------------------
 class CenterDeckAvatar(QWidget):
     def __init__(self):
         super().__init__()
-        # Привязка намертво к рабочему столу
-        self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnBottomHint | Qt.SubWindow)
+        # Исключаем из таскбара и прибиваем к фоновому слою рабочего стола
+        self.setWindowFlags(Qt.SubWindow | Qt.FramelessWindowHint | Qt.WindowStaysOnBottomHint)
         self.setAttribute(Qt.WA_TranslucentBackground, True)
         self.setAttribute(Qt.WA_ShowWithoutActivating, True)
 
@@ -415,25 +413,10 @@ class CenterDeckAvatar(QWidget):
         screen = QApplication.primaryScreen().geometry()
         self.move((screen.width() - self.width()) // 2, (screen.height() // 2) + 20)
 
-        # Таймер посимвольной печати
         self.type_timer = QTimer(self)
         self.type_timer.timeout.connect(self.typewriter_step)
         self.full_text = ""
         self.char_idx = 0
-
-    def showEvent(self, ev):
-        super().showEvent(ev)
-        self.lower()
-        try:
-            win_id = int(self.winId())
-            subprocess.run(["xprop", "-id", str(win_id), "-f", "_NET_WM_WINDOW_TYPE", "32a",
-                            "-set", "_NET_WM_WINDOW_TYPE", "_NET_WM_WINDOW_TYPE_DESKTOP"],
-                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            subprocess.run(["xprop", "-id", str(win_id), "-f", "_NET_WM_STATE", "32a",
-                            "-set", "_NET_WM_STATE", "_NET_WM_STATE_SKIP_TASKBAR,_NET_WM_STATE_SKIP_PAGER,_NET_WM_STATE_BELOW"],
-                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        except Exception:
-            pass
 
     def start_speech(self, user_text, reply_text, duration):
         self.lbl_user.setText(f"« {user_text} »")
@@ -469,7 +452,7 @@ class FloatingDeckTrigger(QWidget):
         self.center_avatar = center_avatar
         self.hud_popup = None
 
-        self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnBottomHint | Qt.SubWindow)
+        self.setWindowFlags(Qt.SubWindow | Qt.FramelessWindowHint | Qt.WindowStaysOnBottomHint)
         self.setAttribute(Qt.WA_TranslucentBackground, True)
         self.setAttribute(Qt.WA_ShowWithoutActivating, True)
 
@@ -494,20 +477,6 @@ class FloatingDeckTrigger(QWidget):
 
         screen = QApplication.primaryScreen().geometry()
         self.move(screen.width() - 170, screen.height() - 85)
-
-    def showEvent(self, ev):
-        super().showEvent(ev)
-        self.lower()
-        try:
-            win_id = int(self.winId())
-            subprocess.run(["xprop", "-id", str(win_id), "-f", "_NET_WM_WINDOW_TYPE", "32a",
-                            "-set", "_NET_WM_WINDOW_TYPE", "_NET_WM_WINDOW_TYPE_DESKTOP"],
-                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            subprocess.run(["xprop", "-id", str(win_id), "-f", "_NET_WM_STATE", "32a",
-                            "-set", "_NET_WM_STATE", "_NET_WM_STATE_SKIP_TASKBAR,_NET_WM_STATE_SKIP_PAGER,_NET_WM_STATE_BELOW"],
-                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        except Exception:
-            pass
 
     def toggle_chat(self):
         if self.hud_popup and self.hud_popup.isVisible():
@@ -711,7 +680,6 @@ class FloatingAiChatDialog(QWidget):
 
     def on_brain_reply(self, user_txt, reply, audio, dur, act):
         self.append_message(reply, is_user=False)
-        # Запускаем синхронную печать под голос на центральном аватаре
         self.center_avatar.start_speech(user_txt, reply, dur)
 
         if os.path.exists(audio):
@@ -798,6 +766,8 @@ if __name__ == "__main__":
     app = QApplication(sys.argv)
     center_av = CenterDeckAvatar()
     center_av.show()
+    center_av.lower()
     w = FloatingDeckTrigger(center_av)
     w.show()
+    w.lower()
     sys.exit(app.exec_())
