@@ -1,6 +1,13 @@
 #!/bin/bash
 export DISPLAY=:0
 
+# Защита от дублей: если интро уже отрабатывало после загрузки — выходим
+LOCKFILE="/tmp/cyber_intro.lock"
+if [ -f "$LOCKFILE" ]; then
+    exit 0
+fi
+touch "$LOCKFILE"
+
 # 1. Запуск eDEX-UI
 /home/sene44/Applications/edex-ui.AppImage --no-sandbox &
 EDEX_PID=$!
@@ -12,11 +19,11 @@ sleep 4
 wmctrl -r :ACTIVE: -b add,above 2>/dev/null
 wmctrl -r "edex" -b add,above 2>/dev/null
 
-# 4. Запускаем Welcome — теперь он физически не сможет перекрыть eDEX-UI
+# 4. Запускаем Welcome
 python3 /opt/cyber-welcome/welcome.py &
 HUD_PID=$!
 
-# 5. Возвращаем фокус на терминал и докручиваем таймер (всего 12 сек)
+# 5. Возвращаем фокус на терминал и докручиваем таймер
 sleep 0.2
 wmctrl -a "edex" 2>/dev/null
 sleep 7.8
