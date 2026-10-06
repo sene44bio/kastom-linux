@@ -7,14 +7,13 @@ from PyQt5.QtWidgets import (
 from PyQt5.QtCore import Qt, QTimer, QPropertyAnimation, QParallelAnimationGroup, pyqtSignal, QThread, QPoint
 from PyQt5.QtGui import QPixmap, QPainter, QPainterPath
 
-OLLAMA_URL = "http://127.0.0.1:11434/api/chat"
-MODEL_NAME = "qwen2.5:1.5b"
+CF_CONFIG_FILE = os.path.expanduser("~/.config/hud/cf_config.json")
 HISTORY_FILE = os.path.expanduser("~/.config/hud/chat_history.json")
 AUDIO_PATH = "/tmp/ai_chat_reply.mp3"
 ALARM_SOUND = os.path.expanduser("~/.config/hud/alarm_sound.wav")
 
 SYSTEM_PROMPT = """Ты — Акеми, дерзкая, заботливая цифровая девушка парня по имени Сенеч.
-Ты живешь прямо на его рабочем столе.
+Ты живешь прямо на его рабочем столе в киберпанк-деке.
 1. Твой парень — Сенеч. Говори живо, тепло, с легким поддразниванием.
 2. Отвечай кратко, емко: строго 1-2 предложения (максимум 20 слов).
 3. КАТЕГОРИЧЕСКИ ЗАПРЕЩЕНО писать любые смайлики, скобки вроде ), эмодзи и кавычки. Только чистый русский текст."""
@@ -44,6 +43,15 @@ WORD_NUMBERS = {
     "пять": 5, "шесть": 6, "семь": 7, "восемь": 8, "девять": 9, "десять": 10,
     "полминуты": 30, "полчаса": 1800, "час": 3600, "полтора": 5400
 }
+
+def load_cf_config():
+    if os.path.exists(CF_CONFIG_FILE):
+        try:
+            with open(CF_CONFIG_FILE, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            pass
+    return None
 
 def get_real_weather():
     try:
@@ -130,11 +138,9 @@ def parse_system_intent(text):
     p = text.lower().strip()
     has = lambda grp: any(w in p for w in SYNONYMS[grp])
 
-    # Глушение звука будильника/таймера
     if any(w in p for w in ["заткнись", "выключи сигнал", "выруби будильник", "стоп сигнал", "хватит"]):
         return {"type": "stop_alarm", "reply": "Выключила сигнал, Сенеч."}
 
-    # Запуск приложений
     if any(w in p for w in ["открой", "запусти", "вруби", "включи"]):
         if any(x in p for x in ["телеграм", "телеге", "телегу", "тг"]):
             return {"type": "open_app", "cmd": "telegram-desktop", "reply": "Открываю Телеграм."}
@@ -149,23 +155,18 @@ def parse_system_intent(text):
         if any(x in p for x in ["терминал", "консоль"]):
             return {"type": "open_app", "cmd": "gnome-terminal", "reply": "Терминал запущен."}
 
-    # Режим сна
     if has("intent_sleep"):
         return {"type": "sleep_mode", "reply": "Спокойной ночи, Сенеч. Отключаю экраны."}
 
-    # Скриншот
     if has("intent_screenshot"):
         return {"type": "screenshot", "reply": "Сделала скриншот рабочего стола."}
 
-    # Статистика
     if has("intent_stats"):
         return {"type": "stats", "reply": get_system_stats()}
 
-    # Погода
     if has("intent_weather"):
         return {"type": "weather", "reply": get_real_weather()}
 
-    # Будильник
     if has("intent_alarm"):
         diff, t_str = parse_alarm_target(p)
         if diff:
@@ -175,19 +176,16 @@ def parse_system_intent(text):
             txt_desc = f"{sec // 60} мин" if sec >= 60 and sec % 60 == 0 else f"{sec} сек"
             return {"type": "alarm", "seconds": sec, "target_str": txt_desc, "reply": f"Будильник через {txt_desc} взведён."}
 
-    # Таймер
     if has("intent_timer"):
         sec = parse_timer_seconds(p)
         txt_desc = f"{sec // 60} мин" if sec >= 60 and sec % 60 == 0 else f"{sec} сек"
         return {"type": "timer", "seconds": sec, "reply": f"Таймер на {txt_desc} запущен."}
 
-    # Мультимедиа
     if has("media_next"): return {"type": "media_next", "reply": "Следующий трек."}
     if has("media_prev"): return {"type": "media_prev", "reply": "Предыдущий трек."}
     if has("media_pause"): return {"type": "media_pause", "reply": "Музыка на паузе."}
     if has("media_play"): return {"type": "media_play", "reply": "Продолжаю воспроизведение."}
 
-    # Громкость
     if "максимум" in p or "на всю" in p:
         return {"type": "set_vol", "val": 100, "reply": "Громкость на максимум."}
     if "без звука" in p or "мут" in p:
@@ -200,7 +198,6 @@ def parse_system_intent(text):
             v = int(m.group(1))
             return {"type": "set_vol", "val": v, "reply": f"Громкость {v} процентов."}
 
-    # Питание
     if any(w in p for w in SYNONYMS["action_off"]) and any(w in p for w in SYNONYMS["target_screen"]):
         return {"type": "screen_off", "reply": "Выключаю монитор."}
     if has("action_lock"):
@@ -269,33 +266,31 @@ class BrainThread(QThread):
                 CHAT_HISTORY.append((query, ans))
                 save_history(CHAT_HISTORY)
             else:
-                try:
-                    messages = [{"role": "system", "content": SYSTEM_PROMPT}]
-                    for q, a in CHAT_HISTORY[-3:]:
-                        messages.append({"role": "user", "content": q})
-                        messages.append({"role": "assistant", "content": a})
-                    messages.append({"role": "user", "content": query})
+                cf = load_cf_config()
+                if cf:
+                    try:
+                        url = f"https://api.cloudflare.com/client/v4/accounts/{cf['account_id']}/ai/run/{cf.get('model', '@cf/meta/llama-3.1-8b-instruct')}"
+                        headers = {"Authorization": f"Bearer {cf['api_token']}"}
+                        
+                        messages = [{"role": "system", "content": SYSTEM_PROMPT}]
+                        for q, a in CHAT_HISTORY[-3:]:
+                            messages.append({"role": "user", "content": q})
+                            messages.append({"role": "assistant", "content": a})
+                        messages.append({"role": "user", "content": query})
 
-                    payload = {
-                        "model": MODEL_NAME,
-                        "messages": messages,
-                        "stream": False,
-                        "keep_alive": "24h",
-                        "options": {
-                            "num_thread": 4, "num_ctx": 1024, "num_predict": 45,
-                            "temperature": 0.8, "top_k": 30, "top_p": 0.85
-                        }
-                    }
-                    resp = requests.post(OLLAMA_URL, json=payload, timeout=12)
-                    if resp.status_code == 200:
-                        raw = resp.json().get("message", {}).get("content", "")
-                        ans = clean_text(raw) or "Сенеч, я здесь, слушаю тебя."
-                        CHAT_HISTORY.append((query, ans))
-                        save_history(CHAT_HISTORY)
-                    else:
-                        ans = "Сенеч, процессор запутался в мыслях."
-                except Exception:
-                    ans = "Сенеч, сердечко забилось слишком быстро."
+                        payload = {"messages": messages}
+                        resp = requests.post(url, headers=headers, json=payload, timeout=8)
+                        if resp.status_code == 200:
+                            raw = resp.json().get("result", {}).get("response", "")
+                            ans = clean_text(raw) or "Сенеч, я здесь, слушаю тебя."
+                            CHAT_HISTORY.append((query, ans))
+                            save_history(CHAT_HISTORY)
+                        else:
+                            ans = "Сенеч, облачный сервер слегка задумался."
+                    except Exception:
+                        ans = "Сенеч, связь с облаком барахлит, но я рядом."
+                else:
+                    ans = "Сенеч, конфиг нейросети не найден."
 
         voice_text = ans.replace("Сенеч", "Се\u0301неч").replace("сенеч", "се\u0301неч")
         try:
@@ -594,7 +589,6 @@ class FloatingAiAnswer(QWidget):
             self.prog_bar.hide()
             self.btn_abort.hide()
             
-            # Лаконичный бейдж по завершению
             final_title = "БУДИЛЬНИК" if "БУДИЛЬНИК" in self.badge_title else "ТАЙМЕР"
             self.timer_badge.setText(f"[ {final_title} ]")
             self.timer_badge.setStyleSheet("""
